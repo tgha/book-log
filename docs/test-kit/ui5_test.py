@@ -70,6 +70,12 @@ with sync_playwright() as p:
     pg.goto(URL + "#/shelf")
     check("서재 「이어서 읽은 날 3일째」 · 오늘 읽은 시간", lambda: (expect(pg.locator("#streak-days")).to_contain_text("3"), expect(pg.locator("#streak-note")).to_contain_text("오늘 30분 읽었어요")))
     pg.screenshot(path=f"{SHOTS}/02-shelf-streak.png")
+    check("읽는 중 카드에 빠른 단추 [독서 시작] · [문장 찍기]", lambda: (expect(pg.locator(".row-quick")).to_have_count(2), expect(pg.locator(".row-quick").first.get_by_role("button", name="독서 시작")).to_be_visible(), expect(pg.locator(".row-quick").first.get_by_role("link", name="문장 찍기")).to_be_visible()))
+    pg.locator(".row-quick").first.get_by_role("button", name="독서 시작").click()
+    check("서재에서 바로 타이머 시작", lambda: expect(pg.locator("#clock")).to_be_visible())
+    pg.get_by_role("button", name="멈춤").click(); pg.get_by_role("button", name="기록하지 않고 끝내기").click()
+    pg.locator("dialog").get_by_role("button", name="끝내기").click()
+    expect(pg.get_by_role("button", name="서재에서 빼기")).to_be_visible()
 
     # ── 통계 ──
     pg.goto(URL + "#/stats")

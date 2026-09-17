@@ -573,3 +573,8 @@ dialog.photo-dialog { inline-size: min(34rem, calc(100vw - 1rem)); padding: .75r
 .shared-notes > li:last-child { border-bottom: 0; padding-bottom: 0; }
 .shared-notes .note-body { margin: .25rem 0 .5rem; }
 #public-block .hint { margin-top: .5rem; }
+
+/* 서재: 읽는 중 카드의 빠른 단추 */
+.row-quick { display: flex; gap: .5rem; padding: 0 0 .9rem 4.5rem; margin-top: -.35rem; }
+.row-quick .btn { text-decoration: none; }
+@media (max-width: 22rem) { .row-quick { padding-left: 0; } }

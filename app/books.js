@@ -2,7 +2,7 @@
 import { api } from "./api.js";
 import { markFromBook } from "./capture.js";
 import { mountBookNotes } from "./notes.js";
-import { minutesText, mountBookLogs, mountRunningBanner } from "./reading.js";
+import { minutesText, mountBookLogs, mountRunningBanner, startTimer } from "./reading.js";
 import { busy, confirmBox, html, raw, toast } from "./ui.js";
 
 const STATUS = { reading: "읽는 중", want: "읽고 싶은", finished: "다 읽음", stopped: "그만 읽음" };
@@ -63,10 +63,14 @@ function progress(item) {
     <span class="book-by">${item.current_page} / ${item.total_pages}쪽 · ${pct}%</span>`;
 }
 
-function shelfRow(item) {
+function shelfRow(item, quick = false) {
   const b = item.book || {};
   return html`<li><a class="book-row" href="#/book/${item.id}">${raw(cover(b))}
-    <span class="book-text"><span class="book-title">${b.title}</span><span class="book-by">${byline(b)}</span>${raw(progress(item))}</span></a></li>`;
+    <span class="book-text"><span class="book-title">${b.title}</span><span class="book-by">${byline(b)}</span>${raw(progress(item))}</span></a>
+    ${raw(quick ? html`<div class="row-quick">
+      <button class="btn btn-quiet btn-small" type="button" data-start-timer="${item.id}">독서 시작</button>
+      <a class="btn btn-quiet btn-small" href="#/capture/${item.id}/camera" data-start-capture>문장 찍기</a>
+    </div>` : "")}</li>`;
 }
 
 function statusChips(name, current, list = ORDER) {
@@ -92,7 +96,7 @@ export async function viewShelf(ctx) {
     const others = items.filter((i) => i.status === shelfFilter);
     const readingBody = error ? html`<p class="empty-line">${error}</p>`
       : loading ? '<p class="empty-line">불러오는 중…</p>'
-      : reading.length ? html`<ul class="book-list">${reading.map((i) => raw(shelfRow(i)))}</ul>`
+      : reading.length ? html`<ul class="book-list">${reading.map((i) => raw(shelfRow(i, true)))}</ul>`
       : '<p class="empty-line">읽고 있는 책이 없어요. 아래 단추로 책을 등록해 보세요.</p>';
     ctx.mount(html`
       <main class="shell">
@@ -122,6 +126,7 @@ export async function viewShelf(ctx) {
       ${raw(ctx.tabbar("shelf"))}`);
     decorate(ctx.app);
     mountRunningBanner(ctx, ctx.app.querySelector("#running-slot"));
+    ctx.app.querySelectorAll("[data-start-timer]").forEach((b) => b.addEventListener("click", (e) => startTimer(ctx, b.dataset.startTimer, e.currentTarget)));
     api.stats.streak().then((r) => {
       if (!ctx.isCurrent("shelf")) return;
       const days = ctx.app.querySelector("#streak-days");

@@ -56,7 +56,7 @@ async function askRunning(ctx, err) {
   if (ok) ctx.go("timer");
 }
 
-async function startTimer(ctx, shelfId, button) {
+export async function startTimer(ctx, shelfId, button) {
   await busy(button, async () => {
     try {
       const r = await api.logs.start(shelfId);
