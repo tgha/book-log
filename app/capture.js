@@ -1,4 +1,4 @@
-// book-log 3단계 화면: 문장 찍기 (1.3.0 간소화)
+// book-log 3단계 화면: 문장 찍기 (1.3.0 간소화 · 1.4.0 띄어쓰기 고치기)
 //   [문장 찍기] → 앱 안 카메라로 소리 없이 찍기 → 읽을 부분 감싸기(모서리 · 테두리 선) → [글자 읽기]
 //   → 첫 단어 · 끝 단어 누르기 → 쪽수 → [저장]
 // · 무음: 폰 기본 카메라 앱(한국 폰은 셔터음을 끌 수 없음) 대신, 앱 안 카메라 화면에서 한 장을 떼어 낸다
@@ -15,6 +15,12 @@ const OCR_MAX = 2000;    // 글자 읽기로 보내는 사진 긴 쪽 최대
 const PHOTO_MAX = 1600;  // 남기는 사진 긴 쪽 최대 (약 0.3MB)
 const HANDLE_NAMES = ["왼쪽 위 모서리", "오른쪽 위 모서리", "오른쪽 아래 모서리", "왼쪽 아래 모서리"];
 const EDGE_NAMES = ["위쪽 선", "오른쪽 선", "아래쪽 선", "왼쪽 선"];
+// bk-ocr 이 넣어 주는 표시 글자 (책 글에는 나오지 않는 유니코드 사용자 영역 문자)
+const GAP = "\uE000";   // 띄어쓰기 의심 공백 → 빨간 밑줄, 누르면 붙음
+const DOUBT = "\uE001"; // 구글이 자신 없어 한 단어 앞 → 빨간 점선
+/** 표시 글자 지우기: 의심 공백은 보통 공백으로 */
+const clean = (t) => String(t || "").replace(/\uE000/g, " ").replace(/\uE001/g, "");
+const countOf = (t, ch) => String(t || "").split(ch).length - 1;
 
 let draft = null;
 let fromBook = null;        // 책 화면의 [문장 찍기]로 들어왔으면 그 책 번호 (저장 뒤 책 화면으로 되돌아가기)
@@ -450,35 +456,48 @@ function mountEditor(stage, src, pts, onChange) {
   };
 }
 
-// ── 단어 눌러 고르기 (첫 단어 → 끝 단어) ────────────────────────────
+// ── 단어 눌러 고르기 (첫 단어 → 끝 단어) · 빨간 밑줄 눌러 붙이기 ────────────
 function wordsOf(text) {
   const out = [];
-  const re = /\S+/g;
+  const re = /[^\s\uE000]+/g;
   let m;
   while ((m = re.exec(text))) out.push([m.index, m.index + m[0].length]);
   return out;
 }
 
-function mountChooser(container, text, initial, onChange) {
+/**
+ * container 를 새로 그린다 (다시 그릴 때 이전 이벤트가 겹치지 않게 칸을 바꿔 끼움).
+ * initial: 이미 고른 범위 {start,end} · onChange(고른 것) · onJoin(붙일 공백 위치)
+ */
+function mountChooser(container, text, initial, onChange, onJoin) {
+  const box = container.cloneNode(false);
+  const scroll = container.scrollTop;
+  container.replaceWith(box);
   const ws = wordsOf(text);
   let a = null;
   let b = null;
   if (initial) {
-    const i = ws.findIndex(([s, e]) => e > initial.start);
+    const i = ws.findIndex(([, e]) => e > initial.start);
     let j = -1;
-    ws.forEach(([s], k) => { if (s < initial.end) j = k; });
+    ws.forEach(([st], k) => { if (st < initial.end) j = k; });
     if (i >= 0 && j >= i) { a = i; b = j; }
   }
   let out = "";
   let at = 0;
-  ws.forEach(([s, e], i) => {
-    const gap = text.slice(at, s);
-    out += gap.includes("\n") ? "<br>".repeat(Math.min(2, gap.split("\n").length - 1)) : gap ? " " : "";
-    out += html`<button type="button" class="w" data-i="${i}" aria-pressed="false">${text.slice(s, e)}</button>`;
+  ws.forEach(([st, e], i) => {
+    const gap = text.slice(at, st);
+    if (gap.includes(GAP)) {
+      const prev = i ? clean(text.slice(ws[i - 1][0], ws[i - 1][1])) : "";
+      out += html`<button type="button" class="gap-fix" data-at="${at + gap.indexOf(GAP)}" aria-label="「${prev}」와 「${clean(text.slice(st, e))}」 붙이기"></button>`;
+    } else if (gap.includes("\n")) out += "<br>".repeat(Math.min(2, gap.split("\n").length - 1));
+    else if (gap) out += " ";
+    const word = text.slice(st, e);
+    out += html`<button type="button" class="w ${word.includes(DOUBT) ? "doubt" : ""}" data-i="${i}" aria-pressed="false">${clean(word)}</button>`;
     at = e;
   });
-  container.innerHTML = out;
-  const buttons = [...container.querySelectorAll("button.w")];
+  box.innerHTML = out;
+  box.scrollTop = scroll;
+  const buttons = [...box.querySelectorAll("button.w")];
   const paint = () => {
     const lo = a === null ? -1 : Math.min(a, b ?? a);
     const hi = a === null ? -1 : Math.max(a, b ?? a);
@@ -491,10 +510,12 @@ function mountChooser(container, text, initial, onChange) {
   };
   const report = () => {
     if (a === null) return onChange(null);
-    if (b === null) return onChange({ first: text.slice(ws[a][0], ws[a][1]) });
+    if (b === null) return onChange({ first: clean(text.slice(ws[a][0], ws[a][1])) });
     return onChange({ start: ws[Math.min(a, b)][0], end: ws[Math.max(a, b)][1] });
   };
-  container.addEventListener("click", (e) => {
+  box.addEventListener("click", (e) => {
+    const fix = e.target.closest("button.gap-fix");
+    if (fix) { onJoin(Number(fix.dataset.at)); return; }
     const btn = e.target.closest("button.w");
     if (!btn) return;
     const i = Number(btn.dataset.i);
@@ -579,7 +600,7 @@ async function stepCamera(ctx, shelfId) {
       shelfId, src,
       quad: [[ix, iy], [src.width - ix, iy], [src.width - ix, src.height - iy], [ix, src.height - iy]],
       flat: null, flatKey: null, readKey: null, imageUrl: null,
-      text: null, sel: null, edited: null, thought: "",
+      text: null, sel: null, edited: null, thought: "", undo: [],
     };
     goStep(ctx, shelfId, "area");
   };
@@ -734,9 +755,10 @@ function stepArea(ctx, shelfId) {
       return showError("읽을 부분을 펴지 못했어요. 동그라미 위치를 바꿔 다시 눌러 주세요.", false);
     }
     try {
-      const { text, used, limit } = await api.ocr.read(await blobToBase64(blob));
+      const { text, marked, used, limit } = await api.ocr.read(await blobToBase64(blob));
       if (!ctx.isCurrent(route)) return;
-      draft.text = joinLines(normalizeText(text));
+      draft.text = joinLines(normalizeText(marked || text));
+      draft.undo = [];
       draft.sel = null;
       draft.edited = null;
       draft.readKey = draft.flatKey;
@@ -766,11 +788,18 @@ function stepArea(ctx, shelfId) {
 
 // ── 3. 문장 고르기 · 쪽수 · 저장 ──────────────────────────────────
 function stepChoose(ctx, shelfId) {
-  const hasText = !!draft.text;
+  const hasText = !!clean(draft.text).trim();
   const keep = !!ctx.state.user.keep_photo;
   const last = lastPage.get(shelfId);
   ctx.mount(frame(shelfId, hasText ? "문장 고르기" : "문장 적기", "", html`
     ${raw(hasText ? html`
+      <div class="fix-bar" id="fix-bar" hidden>
+        <p id="fix-help"></p>
+        <div class="row-actions">
+          <button class="btn btn-quiet btn-small" type="button" id="fix-all">모두 붙이기</button>
+          <button class="btn btn-quiet btn-small" type="button" id="fix-undo" disabled>되돌리기</button>
+        </div>
+      </div>
       <p class="pick-help" id="pick-help" role="status"></p>
       <div class="reader reading" id="chooser"></div>
       <div class="chosen" id="chosen" hidden>
@@ -806,7 +835,8 @@ function stepChoose(ctx, shelfId) {
   const ta = $("#cap-body");
   const editField = $("#edit-field");
   const keepBox = $("#keep");
-  const current = () => (draft.edited !== null ? draft.edited : draft.sel ? draft.text.slice(draft.sel.start, draft.sel.end) : draft.text);
+  /** 저장할 글 (표시 글자는 지운 것) */
+  const current = () => clean(draft.edited !== null ? draft.edited : draft.sel ? draft.text.slice(draft.sel.start, draft.sel.end) : draft.text);
 
   const moreState = () => {
     const bits = [];
@@ -827,7 +857,7 @@ function stepChoose(ctx, shelfId) {
       $("#chosen-text").textContent = t;
       $("#chosen-count").textContent = `고른 문장 · ${t.replace(/\s+/g, " ").trim().length}자`;
     };
-    const chooser = mountChooser($("#chooser"), draft.text, draft.sel, (r) => {
+    const onPick = (r) => {
       if (r && r.first) {
         help.textContent = `「${r.first}」부터 — 끝 단어를 누르세요.`;
         return;
@@ -845,8 +875,49 @@ function stepChoose(ctx, shelfId) {
       draft.sel = null;
       help.textContent = "저장할 문장의 첫 단어를 누르세요. 고르지 않으면 읽은 글 전체를 저장해요.";
       chosen.hidden = true;
+    };
+
+    // 빨간 밑줄(띄어쓰기 의심) 붙이기 · 되돌리기
+    const fixBar = $("#fix-bar");
+    const fixState = () => {
+      const gaps = countOf(draft.text, GAP);
+      const doubts = countOf(draft.text, DOUBT);
+      const bits = [];
+      if (gaps) bits.push(`빨간 밑줄 ${gaps}곳은 띄어쓰기가 의심돼요. 누르면 붙어요.`);
+      if (doubts) bits.push(`빨간 점선 단어 ${doubts}개는 잘못 읽었을 수 있어요. 골라서 [글자 고치기]로 고쳐 주세요.`);
+      if (!gaps && draft.undo.length) bits.push("의심되는 띄어쓰기를 모두 고쳤어요.");
+      $("#fix-help").textContent = bits.join(" ");
+      fixBar.hidden = !bits.length;
+      $("#fix-all").hidden = gaps < 2;
+      $("#fix-undo").disabled = !draft.undo.length;
+    };
+    let chooser;
+    const redraw = () => { chooser = mountChooser($("#chooser"), draft.text, draft.sel, onPick, join); chooser.report(); fixState(); };
+    const shift = (pos, cut) => pos - cut.filter((k) => k < pos).length;
+    const removeAt = (cuts) => {
+      draft.undo.push({ text: draft.text, sel: draft.sel });
+      if (draft.undo.length > 100) draft.undo.shift();
+      let t = draft.text;
+      [...cuts].sort((x, y) => y - x).forEach((k) => { t = t.slice(0, k) + t.slice(k + 1); });
+      if (draft.sel) draft.sel = { start: shift(draft.sel.start, cuts), end: shift(draft.sel.end, cuts) };
+      draft.text = t;
+      redraw();
+    };
+    function join(at) { if (draft.text[at] === GAP) removeAt([at]); }
+    $("#fix-all").addEventListener("click", () => {
+      const cuts = [];
+      for (let k = draft.text.indexOf(GAP); k >= 0; k = draft.text.indexOf(GAP, k + 1)) cuts.push(k);
+      if (cuts.length) { removeAt(cuts); toast(`${cuts.length}곳을 붙였어요.`); }
     });
-    chooser.report();
+    $("#fix-undo").addEventListener("click", () => {
+      const last = draft.undo.pop();
+      if (!last) return;
+      draft.text = last.text;
+      draft.sel = last.sel;
+      redraw();
+    });
+    redraw();
+
     if (draft.edited !== null) { editField.hidden = false; ta.value = draft.edited; chosen.hidden = false; $("#chosen-text").hidden = true; show(); }
     $("#edit-chosen").addEventListener("click", () => {
       if (draft.edited === null) draft.edited = current();

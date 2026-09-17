@@ -1,4 +1,4 @@
-// bk-ocr — 글자 읽기 (v1, 2026-09-17 · 3단계)
+// bk-ocr — 글자 읽기 (v2, 2026-09-17 · 3단계 · 띄어쓰기 의심 표시)
 //   /quota  오늘 [글자 읽기]를 몇 번 썼는지 · 하루 한도
 //   /read   사진 → 구글 Vision 「문서용 글자 읽기」(한국어 우선) → 글자
 //
@@ -34,6 +34,76 @@ async function usedToday(userId: string, upToId?: number): Promise<number> {
 async function finish(rowId: number, ok: boolean, error: string | null) {
   const { error: e } = await supa.from("bk_ocr_usage").update({ ok, error }).eq("id", rowId);
   if (e) console.error("[bk-ocr] 사용 기록 고치기 실패", e.message);
+}
+
+// ── 띄어쓰기 의심 · 자신 없는 단어 표시 (1.4.0) ─────────────────────────
+// 구글이 글자마다 사진 속 위치(상자)를 준다. 두 한글 글자 사이가 거의 붙어 있는데 공백을 넣었으면
+// 「잘못 띄운 곳」으로 보고 그 공백을 GAP 표시 글자로 바꾼다. 구글이 자신 없어 한 단어 앞에는 DOUBT 를 붙인다.
+// 표시 글자는 유니코드 사용자 영역 문자라 책 글에는 나오지 않는다. 화면이 밑줄로 그리고, 저장 전에 모두 지운다.
+export const GAP = "\uE000";
+export const DOUBT = "\uE001";
+const GAP_RATIO = 0.16;   // 두 글자 사이 간격 < 글자 폭 × 이 값 → 띄어쓰기 의심 (실제 책으로 보며 조정)
+const DOUBT_CONF = 0.6;   // 단어 자신감(0~1)이 이보다 낮으면 표시
+const HANGUL = /[\uAC00-\uD7A3]/;
+type Vtx = { x?: number; y?: number };
+type VBox = { vertices?: Vtx[] };
+type VSym = { text?: string; property?: { detectedBreak?: { type?: string } }; boundingBox?: VBox };
+type VWord = { symbols?: VSym[]; confidence?: number };
+type VPage = { blocks?: { paragraphs?: { words?: VWord[] }[] }[] };
+
+function corners(b?: VBox): [number, number][] | null {
+  const v = b?.vertices;
+  if (!Array.isArray(v) || v.length !== 4) return null;
+  return v.map((p) => [Number(p.x ?? 0), Number(p.y ?? 0)] as [number, number]);
+}
+
+export function markText(pages: unknown): { marked: string; gaps: number; doubts: number } | null {
+  if (!Array.isArray(pages) || !pages.length) return null;
+  const all = pages as VPage[];
+  const widths: number[] = [];
+  for (const pg of all) for (const bl of pg.blocks ?? []) for (const pa of bl.paragraphs ?? []) for (const w of pa.words ?? []) {
+    for (const sy of w.symbols ?? []) {
+      const c = corners(sy.boundingBox);
+      if (c && HANGUL.test(sy.text ?? "")) widths.push(Math.hypot(c[1][0] - c[0][0], c[1][1] - c[0][1]));
+    }
+  }
+  widths.sort((a, b) => a - b);
+  const W = widths.length >= 5 ? widths[Math.floor(widths.length / 2)] : 0;
+  let out = "";
+  let gaps = 0;
+  let doubts = 0;
+  for (const pg of all) for (const bl of pg.blocks ?? []) for (const pa of bl.paragraphs ?? []) {
+    const words = pa.words ?? [];
+    words.forEach((w, i) => {
+      const syms = w.symbols ?? [];
+      const text = syms.map((sy) => sy.text ?? "").join("");
+      if (!text) return;
+      if (typeof w.confidence === "number" && w.confidence < DOUBT_CONF && /\p{L}/u.test(text)) { out += DOUBT; doubts++; }
+      out += text;
+      const last = syms[syms.length - 1];
+      const brk = last.property?.detectedBreak?.type ?? "";
+      if (brk === "SPACE" || brk === "SURE_SPACE") {
+        let tight = false;
+        const first = words[i + 1]?.symbols?.[0];
+        const a = corners(last.boundingBox);
+        const b = corners(first?.boundingBox);
+        if (W && a && b && HANGUL.test(last.text ?? "") && HANGUL.test(first?.text ?? "")) {
+          const len = Math.hypot(a[1][0] - a[0][0], a[1][1] - a[0][1]) || 1;
+          const ux = (a[1][0] - a[0][0]) / len;
+          const uy = (a[1][1] - a[0][1]) / len;
+          const along = (p: [number, number]) => p[0] * ux + p[1] * uy;   // 글줄 방향
+          const across = (p: [number, number]) => -p[0] * uy + p[1] * ux; // 글줄에 수직
+          const gap = (along(b[0]) + along(b[3])) / 2 - (along(a[1]) + along(a[2])) / 2;
+          const sameLine = Math.abs((across(a[0]) + across(a[3])) / 2 - (across(b[0]) + across(b[3])) / 2) < W * 0.6;
+          tight = sameLine && gap < W * GAP_RATIO;
+        }
+        if (tight) { out += GAP; gaps++; } else out += " ";
+      } else if (brk === "EOL_SURE_SPACE" || brk === "LINE_BREAK") out += "\n";
+      else if (brk === "HYPHEN") out += "-\n";
+    });
+    if (out && !out.endsWith("\n")) out += "\n";
+  }
+  return { marked: out, gaps, doubts };
 }
 
 /** Vision 이 돌려준 글자 정리: 줄바꿈 통일, 끝 공백 · 빈 줄 정리 */
@@ -127,6 +197,13 @@ serve("bk-ocr", {
       throw new UserError(422, "사진에서 글자를 찾지 못했어요. 글자가 크고 또렷하게 나오게 다시 찍어 주세요.", "NO_TEXT");
     }
     await finish(row.id, true, null);
-    return json(200, { text, used, limit, ms: Date.now() - started });
+    // 표시가 들어간 글자는 따로 준다 (1.3.0 화면은 text 만 쓰므로 그대로 동작)
+    let mark: { marked: string; gaps: number; doubts: number } | null = null;
+    try { mark = markText((res0?.fullTextAnnotation as { pages?: unknown } | undefined)?.pages); } catch (e) { console.error("[bk-ocr] 표시 만들기 실패", String(e)); }
+    const marked = mark ? tidy(mark.marked) : "";
+    return json(200, {
+      text, used, limit, ms: Date.now() - started,
+      marked: marked || null, gaps: marked ? mark!.gaps : 0, doubts: marked ? mark!.doubts : 0,
+    });
   },
 });

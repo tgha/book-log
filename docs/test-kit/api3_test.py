@@ -133,6 +133,15 @@ s,b=call("bk-api","/notes/photo-remove",{"token":A,"note_id":C1["id"]}); check("
 s,b=call("bk-api","/notes/add",{"token":A,"shelf_id":SA,"kind":"capture","body":"지울 메모","keep_photo":True,"photo":IMG,"highlights":[{"start":0,"end":2}]}); C4=b["item"]
 s,b=call("bk-api","/notes/remove",{"token":B,"note_id":C4["id"]}); check("남의 메모는 못 지움",s==404,(s,b))
 s,b=call("bk-api","/notes/remove",{"token":A,"note_id":C4["id"]}); check("메모 지우기 → 밑줄 · 사진도 지워짐",s==200 and sql(f"select count(*) from bk_highlights where note_id='{C4['id']}'")=="0" and not any(C4["id"] in p for p in photos()),(s,photos()))
+# ── 사진 모아 보기 (1.4.0) ──
+s,b=call("bk-api","/notes/add",{"token":A,"shelf_id":SA,"kind":"capture","body":"사진 모음용","page":50,"keep_photo":True,"photo":IMG}); C5=b["item"]
+s,b=call("bk-api","/photos/list",{"token":A}); P=b.get("items",[])
+check("사진 모아 보기: 사진 남긴 메모만(최근 먼저) · 책 이름 · 쪽 · 미리보기",s==200 and [x["note_id"] for x in P]==[C5["id"],C3["id"]] and P[0]["book"]["title"]=="사피엔스" and P[0]["page"]==50 and P[0]["preview"]=="사진 모음용",(s,b))
+check("사진마다 잠깐 열리는 주소가 있고 실제로 열림",all(x["photo_url"] and "token=" in x["photo_url"] for x in P) and get(P[0]["photo_url"])[0]==200 and b["photo_url_seconds"]==600,P)
+check("사진 위치는 화면으로 내보내지 않음(모아 보기)","photo_path" not in json.dumps(b))
+s,b=call("bk-api","/photos/list",{"token":B}); check("남의 사진은 안 보임",s==200 and b["items"]==[],(s,b))
+s,b=call("bk-api","/photos/list",{"token":A,"shelf_id":SA}); check("책별 사진",s==200 and len(b["items"])==2,(s,b))
+s,b=call("bk-api","/photos/list",{"token":B,"shelf_id":SA}); check("남의 책 사진 모아 보기 불가",s==404,(s,b))
 s,b=call("bk-api","/shelf/list",{"token":A}); check("메모를 남긴 책은 서재 목록에서 위로",s==200 and b["items"][0]["id"]==SA,(s,b))
 s,b=call("bk-api","/shelf/remove",{"token":A,"shelf_id":SA}); check("서재에서 빼면 메모 · 밑줄 · 사진 모두 지워짐",s==200 and sql(f"select count(*) from bk_notes where shelf_id='{SA}'")=="0" and sql("select count(*) from bk_highlights")=="0" and photos()==[],(s,photos()))
 
@@ -142,6 +151,17 @@ s,b=call("bk-admin","/usage",{"token":A}); check("관리자 사용량(이번 달
 sql("insert into bk_ocr_usage(user_id,ok) select id,true from bk_users, generate_series(1,1500) where username='reader_b'")
 s,b=call("bk-admin","/usage",{"token":A}); check("사용량이 1000줄 넘어도 모두 셈(11+1500)",s==200 and b["month"]==1511,(s,b.get("month")))
 sql("delete from bk_ocr_usage where error is null and image_bytes is null")
+
+# ── 띄어쓰기 의심 · 자신 없는 단어 표시 (1.4.0) ──
+sql("delete from bk_ocr_usage; update bk_settings set value='100' where key='ocr_daily_limit'")
+vision("layout"); s,b=call("bk-ocr","/read",{"token":A,"image":IMG})
+G="\ue000"; D="\ue001"
+check("글자(text)는 예전과 같이 표시 없음",s==200 and G not in b["text"] and D not in b["text"] and b["text"].startswith("우리가 어떤 사 건을"),(s,b))
+check("거의 붙은 한글 공백 2곳만 표시(보통 띄어쓰기 · 영어는 표시 안 함)",s==200 and b["gaps"]==2 and b["marked"].count(G)==2 and ("사"+G+"건을") in b["marked"] and ("시"+G+"대") in b["marked"] and "a test." in b["marked"],b.get("marked"))
+check("자신 없는 단어 앞에 표시 1곳",s==200 and b["doubts"]==1 and (D+"사람들이") in b["marked"],b.get("marked"))
+check("표시를 지우면 글자와 같음",s==200 and b["marked"].replace(G," ").replace(D,"")==b["text"],(b.get("marked"),b.get("text")))
+vision("ok"); s,b=call("bk-ocr","/read",{"token":A,"image":IMG})
+check("글자 위치가 없는 응답이면 marked 없음(예전처럼)",s==200 and b["marked"] is None and b["gaps"]==0,(s,b))
 
 # ── 잠금 ──
 st,raw,_=get(f"{GW}/rest/v1/bk_notes?select=*")

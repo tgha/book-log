@@ -4,6 +4,31 @@ const fns: Record<string, number> = { "bk-auth": 9001, "bk-admin": 9002, "bk-boo
 let visionMode = "ok"; let visionText = "";
 export const VISION_SAMPLE = "우리가 어떤 사건을 현재의 눈으로\n보면, 그 시대 사람들이 무엇을\n생각했는지 놓치기 쉽다.\nHistory is a con-\nversation with the past.";
 let visionCalls = 0; let lastVision: unknown = null;
+// 글자 위치까지 주는 가짜 응답: [단어, 뒤 간격(px)] — 간격 2 는 거의 붙은 곳(띄어쓰기 의심), 14 는 보통 띄어쓰기
+export const LAYOUT_LINES: [string, number][][] = [
+  [["우리가", 14], ["어떤", 14], ["사", 2], ["건을", 14], ["현재의", 14], ["눈으로", 0]],
+  [["보면,", 14], ["그", 14], ["시", 2], ["대", 14], ["사람들이", 0]],
+  [["History", 14], ["is", 14], ["a", 3], ["test.", 0]],
+];
+const LAYOUT_DOUBT = new Set(["사람들이"]);
+function layoutAnnotation() {
+  const W = 40, H = 44; let y = 100; let text = "";
+  const paragraphs = LAYOUT_LINES.map((line) => {
+    let x = 50;
+    const words = line.map(([w, gap], wi) => {
+      const symbols: Record<string, unknown>[] = [...w].map((ch) => {
+        const x0 = x; x += W;
+        return { text: ch, boundingBox: { vertices: [{ x: x0, y }, { x: x0 + W, y }, { x: x0 + W, y: y + H }, { x: x0, y: y + H }] } };
+      });
+      symbols[symbols.length - 1].property = { detectedBreak: { type: wi === line.length - 1 ? "LINE_BREAK" : "SPACE" } };
+      x += gap;
+      return { symbols, confidence: LAYOUT_DOUBT.has(w) ? 0.4 : 0.98 };
+    });
+    y += 80; text += line.map((l) => l[0]).join(" ") + "\n";
+    return { words };
+  });
+  return { text, pages: [{ blocks: [{ paragraphs }] }] };
+}
 // 가짜 사진 창고: 경로 → { bytes, type }
 const photos = new Map<string, { bytes: Uint8Array; type: string }>();
 const SERVICE = Deno.env.get("SERVICE") ?? "";
@@ -29,6 +54,7 @@ Deno.serve({ port: 8000 }, async (req) => {
     if (visionMode === "badimage") return Response.json({ responses: [{ error: { code: 3, message: "Bad image data." } }] });
     if (visionMode === "empty") return Response.json({ responses: [{}] });
     if (visionMode === "slow") await new Promise((r) => setTimeout(r, 1500));
+    if (visionMode === "layout") return Response.json({ responses: [{ fullTextAnnotation: layoutAnnotation() }] });
     const text = visionMode === "text" ? visionText : VISION_SAMPLE;
     return Response.json({ responses: [{ fullTextAnnotation: { text: text + "\n", pages: [] } }] });
   }
@@ -44,6 +70,12 @@ Deno.serve({ port: 8000 }, async (req) => {
       return new Response(f.bytes, { headers: { "content-type": f.type, ...cors } });
     }
     if (req.headers.get("authorization") !== `Bearer ${SERVICE}`) return new Response('{"statusCode":"403","error":"Unauthorized"}', { status: 403 });
+    if (req.method === "POST" && rest === "sign/bk-photos") { // 여러 장 한꺼번에 (createSignedUrls)
+      const b = await req.json();
+      return Response.json((b.paths ?? []).map((path: string) => photos.has(path)
+        ? { path, signedURL: `/object/sign/bk-photos/${path}?token=tok-${btoa(path).replace(/=/g, "")}`, error: null }
+        : { path, signedURL: null, error: "Either the object does not exist or you do not have access to it" }));
+    }
     if (req.method === "POST" && rest.startsWith("sign/")) {
       const path = decodeURIComponent(rest.slice(5).replace(/^bk-photos\//, ""));
       if (!photos.has(path)) return Response.json({ statusCode: "404", error: "not_found", message: "Object not found" }, { status: 400 });

@@ -1,4 +1,4 @@
-// bk-api — 내 서재 · 메모 · 밑줄 (v2, 2026-09-17 · 3단계)
+// bk-api — 내 서재 · 메모 · 사진 (v3, 2026-09-17 · 3단계)
 //   /shelf/list          내 서재 목록
 //   /shelf/add           서재에 책 넣기 (ISBN → 카카오 정보로 저장 / 직접 입력)
 //   /shelf/get           책 한 권 자세히
@@ -10,6 +10,8 @@
 //   /notes/update        메모 글 · 쪽수 · 한마디 고치기
 //   /notes/remove        메모 지우기 (밑줄 · 사진도)
 //   /notes/photo-remove  메모에 남긴 사진만 지우기
+//   /photos/list         남긴 사진 모아 보기 (볼 때만 잠깐 열리는 주소 포함)
+//   /highlights/*        (1.3.0 부터 화면에서 안 씀, 남겨 둠)
 //   /highlights/list     밑줄 모아 보기
 //   /highlights/add      저장된 메모에 밑줄 더하기
 //   /highlights/remove   밑줄 지우기
@@ -390,7 +392,39 @@ serve("bk-api", {
     return json(200, { item: noteOut(await ownNote(body, user.id)) });
   },
 
-  // ── 밑줄 ────────────────────────────────────────────────
+  // ── 사진 모아 보기 ────────────────────────────────────────
+  "/photos/list": async (_req, body) => {
+    const { user } = await requireApproved(body);
+    let q = supa.from("bk_notes").select("id, shelf_id, kind, body, page, photo_path, created_at, shelf:bk_shelf(id, book:bk_books(id, title))")
+      .eq("user_id", user.id).not("photo_path", "is", null);
+    if (body.shelf_id !== undefined && body.shelf_id !== null && body.shelf_id !== "") {
+      const shelf = await ownShelf(body, user.id);
+      q = q.eq("shelf_id", shelf.id);
+    }
+    const { data, error } = await q.order("created_at", { ascending: false }).limit(MAX_LIST);
+    if (error) throw new Error(error.message);
+    const rows = (data ?? []) as Record<string, unknown>[];
+    const urls = new Map<string, string>();
+    for (let i = 0; i < rows.length; i += 100) {
+      const paths = rows.slice(i, i + 100).map((r) => r.photo_path as string);
+      const { data: signed, error: sErr } = await supa.storage.from(BUCKET).createSignedUrls(paths, PHOTO_URL_SECONDS);
+      if (sErr) { console.error("[bk-api] 사진 주소 만들기 실패", sErr.message); continue; }
+      for (const x of signed ?? []) if (x.path && x.signedUrl) urls.set(x.path, x.signedUrl);
+    }
+    const items = rows.map((r) => {
+      const shelf = (r.shelf ?? {}) as Record<string, unknown>;
+      const text = String(r.body ?? "").replace(/\s+/g, " ").trim();
+      return {
+        note_id: r.id, shelf_id: r.shelf_id, kind: r.kind, page: r.page, created_at: r.created_at,
+        preview: text.length > 80 ? text.slice(0, 80) + "…" : text,
+        book: shelf.book ?? null, photo_url: urls.get(r.photo_path as string) ?? null,
+      };
+    });
+    return json(200, { items, photo_url_seconds: PHOTO_URL_SECONDS, limit: MAX_LIST });
+  },
+
+  // ── 밑줄 (1.3.0 부터 화면에서 쓰지 않음. 예전 기록 보존용으로 남겨 둠) ─────────
+
   "/highlights/list": async (_req, body) => {
     const { user } = await requireApproved(body);
     let q = supa.from("bk_highlights").select(HIGHLIGHT_LIST_SELECT).eq("user_id", user.id);

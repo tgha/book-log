@@ -1,5 +1,6 @@
 # 3단계 화면 시험 (1.3.0 간소화): 앱 안 카메라(무음) → 읽을 부분 감싸기(모서리 · 테두리 선) → 글자 읽기
-#   → 첫 단어 · 끝 단어 고르기 → 쪽수 → 저장 · 메모 · 기록 탭 · 글자 모양 설정 · 관리자 · PC
+#   → 첫 단어 · 끝 단어 고르기 → 쪽수 → 저장 · 메모 · 기록 탭(정렬 4가지 · 사진 모아 보기) · 글자 모양 설정 · 관리자
+#   → 띄어쓰기 의심 빨간 밑줄 누르기 · 모두 붙이기 · 되돌리기 (1.4.0) · PC
 import subprocess, os, json, urllib.request
 from PIL import Image, ImageDraw
 from playwright.sync_api import sync_playwright, expect
@@ -239,23 +240,69 @@ with sync_playwright() as p:
     pg.get_by_role("link", name="메모 쓰기").click()
     pg.get_by_label("떠오른 생각").fill("역사를 볼 때는\n그 시대의 눈으로."); pg.get_by_label("쪽수 (선택)").fill("12")
     pg.get_by_role("button", name="메모 저장").click()
-    check("책 메모 3개 + 쪽수순", lambda: (expect(pg.locator(".note-row")).to_have_count(3), pg.get_by_role("button", name="쪽수순").click() or True, pg.locator(".note-row .note-meta").first.inner_text().startswith("12쪽")))
+    metas = lambda: [m.split(" · ")[0] for m in pg.locator(".note-row .note-meta").all_inner_texts()]
+    check("책 메모 3개, 기본 최신순(12쪽 메모가 맨 위)", lambda: (expect(pg.locator(".note-row")).to_have_count(3), expect(pg.locator("[data-sort-select]")).to_have_value("new"), metas()[0] == "12쪽"))
+    pg.locator("[data-sort-select]").select_option("old")
+    check("오래된순(340쪽 → 찍은 문장 → 12쪽)", lambda: metas() == ["340쪽", "찍은 문장", "12쪽"])
+    pg.locator("[data-sort-select]").select_option("page")
+    check("쪽수순(12 → 340 → 쪽 없음)", lambda: metas() == ["12쪽", "340쪽", "찍은 문장"])
+    pg.locator("[data-sort-select]").select_option("page_desc")
+    check("쪽수 역순(340 → 12 → 쪽 없음)", lambda: metas() == ["340쪽", "12쪽", "찍은 문장"])
 
     # 기록 탭
     pg.goto(URL + "#/notes")
-    check("기록 탭: 메모 3개, 밑줄 보기 없음, 책 고르기 · 정렬", lambda: (expect(pg.get_by_text("메모 3개")).to_be_visible(), pg.locator("main").inner_text().count("밑줄") == 0, expect(pg.locator("#shelf-pick")).to_be_visible(), expect(pg.get_by_role("button", name="작성순")).to_be_visible()))
+    check("기록 탭: [메모 3] [사진 1], 책 고르기, 정렬은 기억(쪽수 역순)", lambda: (expect(pg.get_by_role("button", name="메모 3")).to_be_visible(), expect(pg.get_by_role("button", name="사진 1")).to_be_visible(), pg.locator("main").inner_text().count("밑줄") == 0, expect(pg.locator("#shelf-pick")).to_be_visible(), expect(pg.locator("[data-sort-select]")).to_have_value("page_desc")))
     check("기록 탭 글도 설정한 크기", lambda: pg.evaluate("getComputedStyle(document.querySelector('.note-text')).fontSize") == "26px")
     pg.screenshot(path=f"{SHOTS}/09-notes-tab.png", full_page=True)
+    pg.get_by_role("button", name="사진 1").click()
+    check("[사진] 보기: 사진 1장이 격자로 · 책 이름 · 쪽", lambda: (expect(pg.locator(".photo-tile")).to_have_count(1), expect(pg.locator(".photo-cap")).to_have_text("사피엔스 · 340쪽")))
+    pg.wait_for_timeout(1200)
+    check("사진이 실제로 보임(잠깐 열리는 주소)", lambda: pg.evaluate("document.querySelector('.photo-tile img').naturalWidth") > 100 and "token=" in pg.locator(".photo-tile img").get_attribute("src"))
+    pg.screenshot(path=f"{SHOTS}/10-photos-tab.png", full_page=True)
+    pg.locator(".photo-tile").click()
+    check("사진을 누르면 크게 보기 + [메모 보기]", lambda: (expect(pg.locator("dialog.photo-dialog img")).to_be_visible(), expect(pg.locator("dialog").get_by_role("link", name="메모 보기")).to_be_visible()))
+    pg.wait_for_timeout(600)
+    pg.screenshot(path=f"{SHOTS}/11-photo-viewer.png")
+    pg.locator("dialog").get_by_role("link", name="메모 보기").click()
+    check("[메모 보기] → 그 메모", lambda: (expect(pg.locator("#note-body")).to_contain_text("놓치기 쉽다!"), expect(pg.locator("dialog")).not_to_be_visible()))
+    pg.go_back()
+    check("돌아오면 사진 보기 그대로", lambda: expect(pg.locator(".photo-tile")).to_have_count(1))
+    pg.get_by_role("button", name="메모 3").click()
 
     pg.goto(URL + "#/admin")
     check("관리자 화면 글자 읽기 사용량", lambda: (expect(pg.locator(".usage-big")).to_contain_text("2"), expect(pg.locator("#usage")).to_contain_text("실패 1")))
 
     pg.goto(book_url)
-    pg.get_by_role("button", name="작성순").click()
+    pg.locator("[data-sort-select]").select_option("new")
     pg.locator(".note-row", has_text="사진").click()
     pg.get_by_role("button", name="메모 지우기").click()
     pg.locator("dialog").get_by_role("button", name="지우기").click()
     check("메모 지우기 → 사진도 창고에서 지워짐", lambda: (expect(pg.locator(".note-row")).to_have_count(2), photos() == []))
+    # ── 1.4.0 띄어쓰기 의심: 빨간 밑줄 누르면 붙음 ──
+    sql("update bk_settings set value='100' where key='ocr_daily_limit'")
+    vision("layout")
+    pg.goto(book_url); pg.get_by_role("link", name="문장 찍기").click()
+    pg.locator("input[data-file]").set_input_files("/tmp/bktest/page_small.jpg")
+    expect(pg.get_by_role("heading", name="읽을 부분 감싸기")).to_be_visible()
+    pg.locator("#read").click()
+    expect(pg.get_by_role("heading", name="문장 고르기")).to_be_visible(timeout=8000)
+    words = lambda: pg.locator("#chooser button.w").all_inner_texts()
+    check("띄어쓰기 의심 2곳에 빨간 밑줄 + 안내", lambda: (expect(pg.locator("#chooser .gap-fix")).to_have_count(2), expect(pg.locator("#fix-help")).to_contain_text("빨간 밑줄 2곳")))
+    check("자신 없는 단어는 빨간 점선 + 안내", lambda: (expect(pg.locator("#chooser button.w.doubt")).to_have_text(["사람들이"]), expect(pg.locator("#fix-help")).to_contain_text("빨간 점선 단어 1개")))
+    check("표시 글자는 화면에 안 보임", lambda: "\ue000" not in pg.locator("#chooser").inner_text() and "\ue001" not in pg.locator("#chooser").inner_text())
+    pg.screenshot(path=f"{SHOTS}/12-gap-fix.png", full_page=True)
+    pg.locator("#chooser .gap-fix").first.click()
+    check("빨간 밑줄을 누르면 붙음(사 건을 → 사건을)", lambda: (expect(pg.locator("#chooser .gap-fix")).to_have_count(1), "사건을" in words() and "사" not in words()))
+    pg.get_by_role("button", name="되돌리기").click()
+    check("[되돌리기]", lambda: (expect(pg.locator("#chooser .gap-fix")).to_have_count(2), "사" in words()))
+    w("우리가").click(); w("사람들이").click()
+    pg.get_by_role("button", name="모두 붙이기").click()
+    check("[모두 붙이기] → 밑줄 0 · 고른 범위도 그대로 따라감", lambda: (expect(pg.locator("#chooser .gap-fix")).to_have_count(0), expect(pg.locator("#chosen-text")).to_have_text("우리가 어떤 사건을 현재의 눈으로 보면, 그 시대 사람들이"), expect(pg.locator("#fix-help")).to_contain_text("모두 고쳤어요")))
+    pg.get_by_label("쪽수").fill("20")
+    pg.get_by_role("button", name="저장", exact=True).click()
+    expect(pg.get_by_role("button", name="서재에서 빼기")).to_be_visible(timeout=8000)
+    check("저장된 글에는 표시 글자 없이 고친 띄어쓰기", lambda: sql("select body from bk_notes where page=20") == "우리가 어떤 사건을 현재의 눈으로 보면, 그 시대 사람들이")
+    vision("ok")
     check("자바스크립트 오류 · 보안 규칙 위반 없음", lambda: (_ for _ in ()).throw(Exception(problems)) if problems else True)
     c.close()
 
@@ -276,6 +323,6 @@ with sync_playwright() as p:
     expect(pg2.get_by_role("heading", name="읽을 부분 감싸기")).to_be_visible()
     pg2.wait_for_timeout(300)
     check("PC: 사진 무대가 폰 너비 안 · 웹캠 꺼짐", lambda: pg2.locator("#stage").bounding_box()["width"] <= 34 * 16 and pg2.evaluate("window.__gum.every(g => g.s.getTracks().every(t => t.readyState === 'ended'))"))
-    pg2.screenshot(path=f"{SHOTS}/10-pc-area.png")
+    pg2.screenshot(path=f"{SHOTS}/13-pc-area.png")
     br.close()
 print(f"\n{sum(res)}/{len(res)} 통과")

@@ -23,22 +23,22 @@
 - `gateway.ts` 가 흉내 내는 것
   - `/rest/v1` → PostgREST, `/functions/v1/bk-*` → 각 함수
   - 가짜 카카오 `/v3/search/book` (열쇠 `test-key`)
-  - 가짜 구글 Vision `/v1/images:annotate` (머리글 열쇠 `test-vision-key`). 동작 바꾸기: `GET /__vision?mode=ok|empty|err500|badkey|denied|quota|badimage|slow|text&text=...` (호출 수 · 마지막 요청도 알려 줌)
-  - 가짜 사진 창고 bk-photos (올리기 · 서명 주소 · 보기 · 지우기). 목록 `GET /__photos`, 비우기 `?clear=1`
+  - 가짜 구글 Vision `/v1/images:annotate` (머리글 열쇠 `test-vision-key`). 동작 바꾸기: `GET /__vision?mode=ok|layout|empty|err500|badkey|denied|quota|badimage|slow|text&text=...` (layout = 글자 위치까지 주는 응답, 띄어쓰기 의심 2곳 · 자신 없는 단어 1개. 호출 수 · 마지막 요청도 알려 줌)
+  - 가짜 사진 창고 bk-photos (올리기 · 서명 주소 한 장 · 여러 장 · 보기 · 지우기). 목록 `GET /__photos`, 비우기 `?clear=1`
 - `wrap.ts`: 함수 코드를 고치지 않고 포트만 바꿔 실행
 - `static.mjs`: 8080 웹 서버, vercel.json 보안 헤더 그대로(사진 보기용 img-src 에 로컬 주소만 더함), config.js 서버 주소만 로컬로
 - ⚠️ `pkill -f "<명령어>"` 는 자기 자신(bash)까지 죽이므로 쓰지 말 것
 
-## 시험 (2026-09-17 1.3.0 기준 전부 통과)
+## 시험 (2026-09-17 1.4.0 기준 전부 통과)
 | 스크립트 | 내용 | 개수 |
 | --- | --- | --- |
 | `api_test.py` | 1단계 서버 (가입 · 로그인 · 관리자) | 45 |
 | `api2_test.py` | 2단계 서버 (책 검색 · 서재) | 32 |
-| `api3_test.py` | 3단계 서버 (글자 읽기 · 하루 한도 · 동시 누르기 · 메모 · 밑줄 · 사진 · 사용량) | 76 |
+| `api3_test.py` | 3단계 서버 (글자 읽기 · 하루 한도 · 동시 누르기 · 메모 · 사진 · 사진 모아 보기 · 띄어쓰기 의심 표시 · 사용량) | 87 |
 | `ui_test.py` | 1단계 화면 | 28 |
 | `ui2_test.py` | 2단계 화면 | 29 |
 | `scan_test.py` | 가짜 카메라 · 가짜 바코드 | 7 |
-| `ui3_test.py` | 3단계 화면 1.3.0 (가짜 카메라 무음 · 꺼짐 → 모서리 · 테두리 선 끌기 → 펴기 결과 픽셀 확인 → 글자 읽기 실패/다시 시도 → 첫 단어 · 끝 단어 → 쪽수 · 저장 → 메모 · 기록 탭 · 글자 모양 · 관리자 · PC) | 63 |
+| `ui3_test.py` | 3단계 화면 1.4.0 (가짜 카메라 무음 · 꺼짐 → 모서리 · 테두리 선 끌기 → 펴기 결과 픽셀 확인 → 글자 읽기 실패/다시 시도 → 첫 단어 · 끝 단어 → 쪽수 · 저장 → 메모 · 기록 탭 · 글자 모양 · 관리자 · PC · 빨간 밑줄 붙이기 · 정렬 4가지 · 사진 모아 보기) | 78 |
 
 - 실행 전 `export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers NO_PROXY=127.0.0.1,localhost`
 - 브라우저 콘솔의 401/403/429 와 fonts.googleapis.com 오류는 정상(의도된 시험 · 글꼴 서버 차단)

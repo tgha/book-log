@@ -429,6 +429,31 @@ textarea.reading { line-height: 1.8; }
 .switch input:checked + .switch-track::after { transform: translateX(1.25rem); }
 .switch input:focus-visible + .switch-track { outline: 3px solid var(--ribbon); outline-offset: 2px; }
 
+/* 1.4.0 띄어쓰기 고치기: 빨간 밑줄(누르면 붙음) · 빨간 점선(자신 없는 단어) */
+:root { --spell: #C8312B; }
+.gap-fix {
+  display: inline-block; inline-size: .7em; block-size: 1.15em; margin: 0 .08em; padding: 0; vertical-align: -.2em;
+  border: 0; border-bottom: 3px solid var(--spell); border-radius: 2px; background: rgba(200, 49, 43, .1); cursor: pointer;
+}
+.gap-fix:hover, .gap-fix:focus-visible { background: rgba(200, 49, 43, .28); outline: none; }
+.w.doubt { text-decoration: underline dotted var(--spell); text-decoration-thickness: 2px; text-underline-offset: .28em; }
+.fix-bar { margin: 0 0 .75rem; padding: .7rem .9rem; border-radius: 10px; background: #FBEAE9; color: #7A1F1A; font-size: .9375rem; }
+.fix-bar p { margin: 0; }
+.fix-bar .row-actions { margin: .5rem 0 0; }
+
+/* 1.4.0 사진 모아 보기 */
+.sort-wrap { flex: none; min-inline-size: 7.5rem; }
+.photo-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: .6rem; }
+.photo-tile { display: grid; gap: .3rem; inline-size: 100%; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; color: inherit; font: inherit; }
+.photo-tile img, .photo-missing { display: block; inline-size: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 8px; background: var(--stage); }
+.photo-missing { display: grid; place-items: center; color: #fff; font-size: var(--step--1); padding: .5rem; text-align: center; }
+.photo-cap { font-size: var(--step--1); color: var(--pencil); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+dialog.photo-dialog { inline-size: min(34rem, calc(100vw - 1rem)); padding: .75rem; }
+.viewer { margin: 0; }
+.viewer img { display: block; inline-size: 100%; max-block-size: 72vh; object-fit: contain; background: var(--stage); border-radius: 10px; }
+.viewer figcaption { margin-top: .4rem; }
+.viewer-text { margin: .5rem 0 0; line-height: 1.8; }
+
 /* 메모 목록 */
 .note-actions { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; margin-bottom: 1rem; }
 .note-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }

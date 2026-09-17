@@ -81,26 +81,37 @@ export function noteRow(n, withBook = false) {
   </a></li>`;
 }
 
-/** 정렬: 작성순(새로 쓴 것 먼저) / 쪽수순(책 이름 → 쪽 → 쓴 순서) */
+// ── 정렬 (고른 것을 이 기기에 기억, 메모 · 사진 · 책 화면 공통) ─────────────
+const SORT_KEY = "bk_sort";
+const SORTS = [["new", "최신순"], ["old", "오래된순"], ["page", "쪽수순"], ["page_desc", "쪽수 역순"]];
+function getSort() {
+  try { const v = localStorage.getItem(SORT_KEY); return SORTS.some(([id]) => id === v) ? v : "new"; } catch { return "new"; }
+}
+function setSort(v) { try { localStorage.setItem(SORT_KEY, v); } catch { /* 저장 불가 */ } }
+
+/** 최신순 · 오래된순 / 쪽수순 · 쪽수 역순(책 이름 → 쪽, 쪽 없는 것은 뒤로) */
 function sortItems(items, sort) {
   const list = items.slice();
-  if (sort === "page") {
-    list.sort((x, y) => (x.book?.title || "").localeCompare(y.book?.title || "", "ko")
-      || (x.page ?? 1e9) - (y.page ?? 1e9)
-      || String(x.created_at).localeCompare(String(y.created_at)));
-  } else list.sort((x, y) => String(y.created_at).localeCompare(String(x.created_at)));
+  const t = (x) => String(x.created_at);
+  const title = (x, y) => (x.book?.title || "").localeCompare(y.book?.title || "", "ko");
+  const noPage = (x) => (x.page === null || x.page === undefined ? 1 : 0);
+  if (sort === "old") list.sort((x, y) => t(x).localeCompare(t(y)));
+  else if (sort === "page") list.sort((x, y) => title(x, y) || noPage(x) - noPage(y) || (x.page ?? 0) - (y.page ?? 0) || t(x).localeCompare(t(y)));
+  else if (sort === "page_desc") list.sort((x, y) => title(x, y) || noPage(x) - noPage(y) || (y.page ?? 0) - (x.page ?? 0) || t(y).localeCompare(t(x)));
+  else list.sort((x, y) => t(y).localeCompare(t(x)));
   return list;
 }
 
-function sortButtons(sort) {
-  return html`<div class="segments segments-small" role="group" aria-label="정렬">
-    <button type="button" data-sort="recent" aria-pressed="${sort === "recent"}">작성순</button>
-    <button type="button" data-sort="page" aria-pressed="${sort === "page"}">쪽수순</button>
-  </div>`;
+function sortSelect() {
+  const cur = getSort();
+  return html`<label class="select-wrap sort-wrap"><span class="visually-hidden">정렬</span>
+    <select data-sort-select>${SORTS.map(([id, label]) => raw(html`<option value="${id}" ${raw(id === cur ? "selected" : "")}>${label}</option>`))}</select></label>`;
+}
+function wireSort(root, redraw) {
+  root.querySelector("[data-sort-select]")?.addEventListener("change", (e) => { setSort(e.target.value); redraw(); });
 }
 
 // ── 책 자세히 안의 「메모」 ─────────────────────────────────
-let bookSort = "recent";
 export async function mountBookNotes(ctx, root, shelfId) {
   const route = `book/${shelfId}`;
   root.innerHTML = html`
@@ -125,16 +136,34 @@ export async function mountBookNotes(ctx, root, shelfId) {
       box.innerHTML = '<p class="empty-line">아직 남긴 메모가 없어요. 마음에 남은 문장을 찍어 보세요.</p>';
       return;
     }
-    box.innerHTML = html`${raw(items.length > 1 ? sortButtons(bookSort) : "")}
-      <ul class="note-list">${sortItems(items, bookSort).map((n) => raw(noteRow(n)))}</ul>`;
-    box.querySelectorAll("[data-sort]").forEach((b) => b.addEventListener("click", () => { bookSort = b.dataset.sort; draw(); }));
+    box.innerHTML = html`${raw(items.length > 1 ? html`<div class="list-tools">${raw(sortSelect())}</div>` : "")}
+      <ul class="note-list">${sortItems(items, getSort()).map((n) => raw(noteRow(n)))}</ul>`;
+    wireSort(box, draw);
   };
   draw();
 }
 
-// ── 기록 탭 ──────────────────────────────────────────────
-const tab = { sort: "recent", shelf: "" };
-export function resetNotes() { tab.sort = "recent"; tab.shelf = ""; bookSort = "recent"; }
+// ── 사진 크게 보기 ────────────────────────────────────────
+function openPhoto(p) {
+  const dlg = document.getElementById("dialog");
+  const cap = [p.book?.title, p.page !== null && p.page !== undefined ? `${p.page}쪽` : "", formatDate(p.created_at)].filter(Boolean).join(" · ");
+  dlg.classList.add("photo-dialog");
+  dlg.innerHTML = html`
+    <figure class="viewer"><img src="${p.photo_url}" alt="${cap} 사진" referrerpolicy="no-referrer"><figcaption class="note-meta">${cap}</figcaption></figure>
+    ${raw(p.preview ? html`<p class="viewer-text reading">${p.preview}</p>` : "")}
+    <div class="actions">
+      <a class="btn btn-quiet btn-small" href="#/note/${p.note_id}" data-go-note>메모 보기</a>
+      <button class="btn btn-primary btn-small" type="button" data-close>닫기</button>
+    </div>`;
+  dlg.querySelector("[data-close]").addEventListener("click", () => dlg.close());
+  dlg.querySelector("[data-go-note]").addEventListener("click", () => dlg.close());
+  dlg.addEventListener("close", () => dlg.classList.remove("photo-dialog"), { once: true });
+  dlg.showModal();
+}
+
+// ── 기록 탭: [메모] [사진] ───────────────────────────────────
+const tab = { view: "notes", shelf: "" };
+export function resetNotes() { tab.view = "notes"; tab.shelf = ""; }
 
 export async function viewNotes(ctx) {
   const shell = (body) => ctx.mount(html`
@@ -152,6 +181,9 @@ export async function viewNotes(ctx) {
     return;
   }
   if (!ctx.isCurrent("notes")) return;
+  let photos = null;    // 사진 목록 (볼 때 받아 옴, 주소는 10분짜리라 8분 지나면 새로 받음)
+  let photosAt = 0;
+  let photoError = "";
 
   const draw = () => {
     if (!notes.length) {
@@ -161,22 +193,64 @@ export async function viewNotes(ctx) {
     const books = new Map();
     for (const n of notes) if (n.book) books.set(n.shelf_id, n.book.title);
     if (tab.shelf && !books.has(tab.shelf)) tab.shelf = "";
-    const shown = sortItems(notes.filter((x) => !tab.shelf || x.shelf_id === tab.shelf), tab.sort);
+    const mine = (x) => !tab.shelf || x.shelf_id === tab.shelf;
+    const shownNotes = sortItems(notes.filter(mine), getSort());
+    const photoCount = notes.filter((n) => n.has_photo && mine(n)).length;
+    let body;
+    if (tab.view === "photos") {
+      if (photoError) body = html`<p class="empty-line">${photoError}</p>`;
+      else if (!photos) body = '<p class="empty-line">사진을 불러오는 중…</p>';
+      else {
+        const shown = sortItems(photos.filter(mine), getSort());
+        body = shown.length
+          ? html`<ul class="photo-grid">${shown.map((p) => raw(html`<li><button type="button" class="photo-tile" data-note="${p.note_id}">
+              ${raw(p.photo_url ? html`<img src="${p.photo_url}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<span class="photo-missing">사진을 불러오지 못했어요</span>')}
+              <span class="photo-cap">${[tab.shelf ? "" : p.book?.title, p.page !== null && p.page !== undefined ? `${p.page}쪽` : ""].filter(Boolean).join(" · ") || formatDate(p.created_at)}</span>
+            </button></li>`))}</ul>`
+          : '<p class="empty-line">남긴 사진이 없어요. 문장을 저장할 때 [더 하기] → [사진도 남기기]를 켜면 여기 모여요.</p>';
+      }
+    } else {
+      body = shownNotes.length ? html`<ul class="note-list">${shownNotes.map((x) => raw(noteRow(x, !tab.shelf)))}</ul>` : '<p class="empty-line">메모가 없어요.</p>';
+    }
     shell(html`
-      <p class="note-meta">메모 ${shown.length}개</p>
+      <div class="segments" role="group" aria-label="보기">
+        <button type="button" data-view="notes" aria-pressed="${tab.view === "notes"}">메모 ${shownNotes.length}</button>
+        <button type="button" data-view="photos" aria-pressed="${tab.view === "photos"}">사진 ${photoCount}</button>
+      </div>
       <div class="list-tools">
         <label class="select-wrap"><span class="visually-hidden">책 고르기</span>
           <select id="shelf-pick">
             <option value="">모든 책</option>
             ${[...books.entries()].sort((x, y) => x[1].localeCompare(y[1], "ko")).map(([id, t]) => raw(html`<option value="${id}" ${raw(id === tab.shelf ? "selected" : "")}>${t}</option>`))}
           </select></label>
-        ${raw(sortButtons(tab.sort))}
+        ${raw(sortSelect())}
       </div>
-      <ul class="note-list">${shown.map((x) => raw(noteRow(x, !tab.shelf)))}</ul>`);
-    ctx.app.querySelectorAll("[data-sort]").forEach((b) => b.addEventListener("click", () => { tab.sort = b.dataset.sort; draw(); }));
+      ${raw(body)}`);
+    ctx.app.querySelectorAll("[data-view]").forEach((b) => b.addEventListener("click", () => { tab.view = b.dataset.view; draw(); loadPhotos(); }));
     ctx.app.querySelector("#shelf-pick").addEventListener("change", (e) => { tab.shelf = e.target.value; draw(); });
+    wireSort(ctx.app, draw);
+    ctx.app.querySelectorAll(".photo-tile").forEach((b) => b.addEventListener("click", () => {
+      const p = photos.find((x) => x.note_id === b.dataset.note);
+      if (p?.photo_url) openPhoto(p); else ctx.go(`note/${b.dataset.note}`);
+    }));
+    ctx.app.querySelectorAll(".photo-tile img").forEach((img) => img.addEventListener("error", () => {
+      const s = document.createElement("span");
+      s.className = "photo-missing";
+      s.textContent = "사진을 불러오지 못했어요";
+      img.replaceWith(s);
+    }, { once: true }));
+  };
+  const loadPhotos = async () => {
+    if (tab.view !== "photos" || (photos && Date.now() - photosAt < 8 * 60000)) return;
+    photoError = "";
+    try {
+      ({ items: photos } = await api.photos.list());
+      photosAt = Date.now();
+    } catch (err) { photoError = err.message; }
+    if (ctx.isCurrent("notes") && tab.view === "photos") draw();
   };
   draw();
+  loadPhotos();
 }
 
 // ── 메모 자세히 ───────────────────────────────────────────
