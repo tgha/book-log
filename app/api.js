@@ -75,11 +75,6 @@ export const api = {
     remove: (note_id) => call("bk-api", "/notes/remove", { note_id }),
     removePhoto: (note_id) => call("bk-api", "/notes/photo-remove", { note_id }),
   },
-  highlights: {
-    list: (shelf_id) => call("bk-api", "/highlights/list", shelf_id ? { shelf_id } : {}),
-    add: (note_id, start, end) => call("bk-api", "/highlights/add", { note_id, start, end }),
-    remove: (highlight_id) => call("bk-api", "/highlights/remove", { highlight_id }),
-  },
   admin: {
     users: () => call("bk-admin", "/users"),
     approve: (user_id) => call("bk-admin", "/approve", { user_id }),

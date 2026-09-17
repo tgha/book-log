@@ -506,7 +506,7 @@ function drawBook(ctx, item) {
   ctx.app.querySelector("#remove").addEventListener("click", async (e) => {
     const ok = await confirmBox({
       title: "서재에서 뺄까요?",
-      body: `「${b.title}」과 이 책에 남긴 기록(독서 시간·메모·밑줄·사진)이 함께 지워지고, 되돌릴 수 없어요.`,
+      body: `「${b.title}」과 이 책에 남긴 기록(독서 시간·메모·사진)이 함께 지워지고, 되돌릴 수 없어요.`,
       ok: "빼기", danger: true,
     });
     if (!ok) return;

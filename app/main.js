@@ -2,7 +2,7 @@
 import { api, ApiError, session } from "./api.js";
 import { resetBooks, stopScanner, viewAdd, viewBook, viewConfirm, viewManual, viewScan, viewShelf } from "./books.js";
 import { leaveCapture, resetCapture, viewCapture } from "./capture.js";
-import { resetNotes, viewNote, viewNotes, viewWrite } from "./notes.js";
+import { readingSettingsHtml, resetNotes, viewNote, viewNotes, viewWrite, wireReadingSettings } from "./notes.js";
 import { APP_VERSION } from "./config.js";
 import { busy, confirmBox, formatDate, html, raw, secretBox, toast } from "./ui.js";
 
@@ -268,6 +268,10 @@ function viewMe() {
         <h2>관리</h2>
         <button class="btn btn-primary" data-go="admin">회원 관리${state.pendingCount ? ` (승인 대기 ${state.pendingCount}명)` : ""}</button>
       </section>` : "")}
+      <section class="block" id="reading-block">
+        <h2>글자 모양</h2>
+        ${raw(readingSettingsHtml())}
+      </section>
       <section class="block">
         <h2>이름 바꾸기</h2>
         <form class="form" id="rename" novalidate>
@@ -291,6 +295,7 @@ function viewMe() {
         <p class="version">book-log ${APP_VERSION}</p>
       </section>
     </main>`);
+  wireReadingSettings(app.querySelector("#reading-block"));
   const rename = app.querySelector("#rename");
   rename.addEventListener("submit", (e) => {
     e.preventDefault();
