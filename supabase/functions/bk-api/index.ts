@@ -1,4 +1,4 @@
-// bk-api — 내 서재 · 메모 · 사진 · 독서 시간 (v4, 2026-09-17 · 4단계)
+// bk-api — 내 서재 · 메모 · 사진 · 독서 시간 · 공개 · 통계 (v5, 2026-09-17 · 5단계)
 //   /shelf/list          내 서재 목록
 //   /shelf/add           서재에 책 넣기 (ISBN → 카카오 정보로 저장 / 직접 입력)
 //   /shelf/get           책 한 권 자세히
@@ -19,6 +19,12 @@
 //   /logs/list           책 한 권의 독서 시간 목록 · 합계
 //   /logs/update         독서 시간 고치기
 //   /logs/remove         독서 시간 지우기
+//   /stats               달별 통계 (권수 · 시간 · 하루 평균 · 달력 · 다 읽은 책 · 읽는 중)
+//   /stats/streak        이어서 읽은 날 · 최고 기록 · 오늘 읽은 시간 (서재 화면용)
+//   /public/users        공개한 책이 있는 회원 목록
+//   /public/shelf        그 회원이 공개한 책장
+//   /public/book         공개한 책 한 권의 기록 전체 (시간 · 메모 · 사진)
+//   /public/recent       최근 공개된 문장 모음
 //   /highlights/*        (1.3.0 부터 화면에서 안 씀, 남겨 둠)
 //   /highlights/list     밑줄 모아 보기
 //   /highlights/add      저장된 메모에 밑줄 더하기
@@ -222,6 +228,87 @@ async function ownLog(body: Record<string, unknown>, userId: string) {
   return data as Record<string, unknown>;
 }
 
+// ── 통계 · 공개 도우미 (5단계) ─────────────────────────────────
+const PUBLIC_BOOK_SELECT = "id, user_id, status, started_on, finished_on, total_pages, current_page, updated_at, book:bk_books(id, title, authors, translators, publisher, published_on, cover_url, description)";
+
+/** 한 달의 첫날 · 다음 달 첫날 (YYYY-MM-DD) */
+function monthRange(m: string): { start: string; next: string; days: number } {
+  const [y, mo] = m.split("-").map(Number);
+  const start = `${y}-${String(mo).padStart(2, "0")}-01`;
+  const ny = mo === 12 ? y + 1 : y;
+  const nm = mo === 12 ? 1 : mo + 1;
+  return { start, next: `${ny}-${String(nm).padStart(2, "0")}-01`, days: new Date(Date.UTC(ny, nm - 1, 1) - 86400000).getUTCDate() };
+}
+
+function monthOf(v: unknown): string {
+  const t = typeof v === "string" ? v.trim() : "";
+  if (!t) return kstToday().slice(0, 7);
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(t) || t < "2000-01" || t > "2999-12") throw new UserError(400, "달을 올바르게 골라 주세요.");
+  return t;
+}
+
+const dayAfter = (iso: string) => new Date(Date.parse(iso + "T00:00:00Z") + 86400000).toISOString().slice(0, 10);
+
+/** 내 독서 시간 기록의 날짜별 분 (읽은 날 → 분). 1000줄씩 나눠 읽는다 */
+async function minutesByDay(userId: string, from?: string, to?: string): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  for (let start = 0; start < 20000; start += 1000) {
+    let q = supa.from("bk_reading_logs").select("read_on, minutes, shelf_id, ended_at, method")
+      .eq("user_id", userId).not("minutes", "is", null);
+    if (from) q = q.gte("read_on", from);
+    if (to) q = q.lt("read_on", to);
+    const { data, error } = await q.order("read_on", { ascending: true }).range(start, start + 999);
+    if (error) throw new Error(error.message);
+    for (const r of data ?? []) {
+      if (r.method === "timer" && !r.ended_at) continue;
+      out.set(r.read_on as string, (out.get(r.read_on as string) ?? 0) + ((r.minutes as number) ?? 0));
+    }
+    if (!data || data.length < 1000) break;
+  }
+  return out;
+}
+
+/** 이어서 읽은 날: 오늘(또는 어제)부터 끊기지 않고 이어진 날수 + 가장 길었던 기록 */
+function streakOf(days: string[]): { streak: number; best: number } {
+  const set = new Set(days);
+  const sorted = [...set].sort();
+  let best = 0;
+  let run = 0;
+  let prev = "";
+  for (const d of sorted) {
+    run = prev && dayAfter(prev) === d ? run + 1 : 1;
+    prev = d;
+    if (run > best) best = run;
+  }
+  const today = kstToday();
+  const yesterday = new Date(Date.parse(today + "T00:00:00Z") - 86400000).toISOString().slice(0, 10);
+  let cur = set.has(today) ? today : set.has(yesterday) ? yesterday : "";
+  let streak = 0;
+  while (cur && set.has(cur)) {
+    streak++;
+    cur = new Date(Date.parse(cur + "T00:00:00Z") - 86400000).toISOString().slice(0, 10);
+  }
+  return { streak, best };
+}
+
+/** 공개된 책인지 확인하고 돌려준다 (누구 책이든 공개면 볼 수 있음) */
+async function publicShelf(body: Record<string, unknown>) {
+  const id = str(body, "shelf_id", 40);
+  if (!UUID.test(id)) throw new UserError(400, "책을 골라 주세요.");
+  const { data, error } = await supa.from("bk_shelf").select(PUBLIC_BOOK_SELECT).eq("id", id).eq("is_public", true).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new UserError(404, "지금은 볼 수 없는 책이에요. 공개가 꺼졌을 수 있어요.", "NOT_PUBLIC");
+  return data as Record<string, unknown>;
+}
+
+async function userMap(ids: string[]): Promise<Map<string, { display_name: string; username: string }>> {
+  const out = new Map<string, { display_name: string; username: string }>();
+  if (!ids.length) return out;
+  const { data } = await supa.from("bk_users").select("id, display_name, username").in("id", [...new Set(ids)]);
+  for (const u of data ?? []) out.set(u.id as string, { display_name: u.display_name as string, username: u.username as string });
+  return out;
+}
+
 serve("bk-api", {
   "/shelf/list": async (_req, body) => {
     const { user } = await requireApproved(body);
@@ -283,6 +370,10 @@ serve("bk-api", {
       } else if (cur.status === "finished" && !("finished_on" in body)) {
         upd.finished_on = null;
       }
+    }
+    if ("is_public" in body) {
+      if (typeof body.is_public !== "boolean") throw new UserError(400, "공개 설정이 올바르지 않아요.");
+      upd.is_public = body.is_public;
     }
     if ("started_on" in body) upd.started_on = dateOrNull(body.started_on, "시작한 날");
     if ("finished_on" in body) upd.finished_on = dateOrNull(body.finished_on, "다 읽은 날");
@@ -558,6 +649,176 @@ serve("bk-api", {
     const { error } = await supa.from("bk_reading_logs").delete().eq("id", log.id).eq("user_id", user.id);
     if (error) throw new Error(error.message);
     return json(200, { ok: true });
+  },
+
+  // ── 통계 (5단계) ─────────────────────────────────────────
+  "/stats": async (_req, body) => {
+    const { user } = await requireApproved(body);
+    const month = monthOf(body.month);
+    const { start, next, days } = monthRange(month);
+    const today = kstToday();
+    const thisMonth = month === today.slice(0, 7);
+
+    // 그 달의 독서 시간
+    const logs: { read_on: string; minutes: number; shelf_id: string }[] = [];
+    for (let from = 0; from < 20000; from += 1000) {
+      const { data, error } = await supa.from("bk_reading_logs").select("read_on, minutes, shelf_id, ended_at, method")
+        .eq("user_id", user.id).not("minutes", "is", null).gte("read_on", start).lt("read_on", next)
+        .order("read_on", { ascending: true }).range(from, from + 999);
+      if (error) throw new Error(error.message);
+      for (const r of data ?? []) {
+        if (r.method === "timer" && !r.ended_at) continue;
+        logs.push({ read_on: r.read_on as string, minutes: (r.minutes as number) ?? 0, shelf_id: r.shelf_id as string });
+      }
+      if (!data || data.length < 1000) break;
+    }
+    const calendar: Record<string, number> = {};
+    let longest = 0;
+    for (const l of logs) {
+      calendar[l.read_on] = (calendar[l.read_on] ?? 0) + l.minutes;
+      if (l.minutes > longest) longest = l.minutes;
+    }
+    const totalMinutes = logs.reduce((a, l) => a + l.minutes, 0);
+    const readShelves = new Set(logs.map((l) => l.shelf_id));
+    const divisor = thisMonth ? Number(today.slice(8)) : days;
+
+    // 그 달에 다 읽은 책 · 지금 읽는 중인 책
+    const { data: finished } = await supa.from("bk_shelf").select(SHELF_SELECT)
+      .eq("user_id", user.id).eq("status", "finished").gte("finished_on", start).lt("finished_on", next)
+      .order("finished_on", { ascending: false }).limit(200);
+    const { data: reading } = await supa.from("bk_shelf").select(SHELF_SELECT)
+      .eq("user_id", user.id).eq("status", "reading").order("updated_at", { ascending: false }).limit(50);
+    // 그 달에 남긴 메모 수
+    const { count: noteCount } = await supa.from("bk_notes").select("id", { count: "exact", head: true })
+      .eq("user_id", user.id).gte("created_at", start).lt("created_at", next);
+    // 이어서 읽은 날 (전체 기간)
+    const allDays = await minutesByDay(user.id);
+    const { streak, best } = streakOf([...allDays.keys()]);
+
+    return json(200, {
+      month, days, today,
+      total_minutes: totalMinutes,
+      average_minutes: Math.round(totalMinutes / Math.max(1, divisor)),
+      average_over: divisor,
+      read_days: Object.keys(calendar).length,
+      books_read: readShelves.size,
+      books_finished: (finished ?? []).length,
+      longest_minutes: longest,
+      note_count: noteCount ?? 0,
+      streak, best_streak: best,
+      calendar,
+      finished: finished ?? [],
+      reading: reading ?? [],
+    });
+  },
+
+  "/stats/streak": async (_req, body) => {
+    const { user } = await requireApproved(body);
+    const days = await minutesByDay(user.id);
+    const { streak, best } = streakOf([...days.keys()]);
+    return json(200, { streak, best_streak: best, today_minutes: days.get(kstToday()) ?? 0, today: kstToday() });
+  },
+
+  // ── 공개 · 둘러보기 (5단계) ────────────────────────────────
+  "/public/users": async (_req, body) => {
+    const { user } = await requireApproved(body);
+    const { data, error } = await supa.from("bk_shelf").select("user_id, updated_at").eq("is_public", true).limit(5000);
+    if (error) throw new Error(error.message);
+    const counts = new Map<string, { books: number; last: string }>();
+    for (const r of data ?? []) {
+      const c = counts.get(r.user_id as string) ?? { books: 0, last: "" };
+      c.books++;
+      if (String(r.updated_at) > c.last) c.last = String(r.updated_at);
+      counts.set(r.user_id as string, c);
+    }
+    const names = await userMap([...counts.keys()]);
+    const users = [...counts.entries()].map(([id, c]) => ({
+      user_id: id, display_name: names.get(id)?.display_name ?? "회원", username: names.get(id)?.username ?? "",
+      books: c.books, last_at: c.last, me: id === user.id,
+    })).sort((a, b) => b.books - a.books || a.display_name.localeCompare(b.display_name, "ko"));
+    return json(200, { users });
+  },
+
+  "/public/shelf": async (_req, body) => {
+    await requireApproved(body);
+    const id = str(body, "user_id", 40);
+    if (!UUID.test(id)) throw new UserError(400, "회원을 골라 주세요.");
+    const names = await userMap([id]);
+    if (!names.has(id)) throw new UserError(404, "회원을 찾을 수 없어요.", "NOT_FOUND");
+    const { data, error } = await supa.from("bk_shelf").select(PUBLIC_BOOK_SELECT)
+      .eq("user_id", id).eq("is_public", true).order("updated_at", { ascending: false }).limit(500);
+    if (error) throw new Error(error.message);
+    const items = (data ?? []) as Record<string, unknown>[];
+    const ids = items.map((x) => x.id as string);
+    const notes = new Map<string, number>();
+    const minutes = new Map<string, number>();
+    if (ids.length) {
+      const { data: n } = await supa.from("bk_notes").select("shelf_id").in("shelf_id", ids).limit(5000);
+      for (const r of n ?? []) notes.set(r.shelf_id as string, (notes.get(r.shelf_id as string) ?? 0) + 1);
+      const { data: l } = await supa.from("bk_reading_logs").select("shelf_id, minutes, ended_at, method").in("shelf_id", ids).limit(5000);
+      for (const r of l ?? []) {
+        if (r.method === "timer" && !r.ended_at) continue;
+        minutes.set(r.shelf_id as string, (minutes.get(r.shelf_id as string) ?? 0) + ((r.minutes as number) ?? 0));
+      }
+    }
+    return json(200, {
+      owner: { user_id: id, ...names.get(id) },
+      items: items.map((x) => ({ ...x, note_count: notes.get(x.id as string) ?? 0, total_minutes: minutes.get(x.id as string) ?? 0 })),
+    });
+  },
+
+  "/public/book": async (_req, body) => {
+    await requireApproved(body);
+    const shelf = await publicShelf(body);
+    const names = await userMap([shelf.user_id as string]);
+    const { data: notes, error } = await supa.from("bk_notes")
+      .select("id, kind, body, page, thought, photo_path, created_at")
+      .eq("shelf_id", shelf.id).order("created_at", { ascending: false }).limit(MAX_LIST);
+    if (error) throw new Error(error.message);
+    const rows = (notes ?? []) as Record<string, unknown>[];
+    const urls = new Map<string, string>();
+    const paths = rows.map((r) => r.photo_path as string).filter(Boolean);
+    for (let i = 0; i < paths.length; i += 100) {
+      const { data: signed, error: sErr } = await supa.storage.from(BUCKET).createSignedUrls(paths.slice(i, i + 100), PHOTO_URL_SECONDS);
+      if (sErr) { console.error("[bk-api] 공개 사진 주소 실패", sErr.message); continue; }
+      for (const x of signed ?? []) if (x.path && x.signedUrl) urls.set(x.path, x.signedUrl);
+    }
+    const { data: logs } = await supa.from("bk_reading_logs").select("id, method, minutes, read_on, end_page, ended_at")
+      .eq("shelf_id", shelf.id).not("minutes", "is", null).order("read_on", { ascending: false }).limit(500);
+    const done = (logs ?? []).filter((x) => x.method === "manual" || x.ended_at);
+    return json(200, {
+      item: shelf,
+      owner: { user_id: shelf.user_id, ...names.get(shelf.user_id as string) },
+      notes: rows.map((r) => ({
+        id: r.id, kind: r.kind, body: r.body, page: r.page, thought: r.thought ?? null, created_at: r.created_at,
+        photo_url: r.photo_path ? urls.get(r.photo_path as string) ?? null : null,
+      })),
+      logs: done,
+      total_minutes: done.reduce((a, x) => a + ((x.minutes as number) ?? 0), 0),
+    });
+  },
+
+  "/public/recent": async (_req, body) => {
+    await requireApproved(body);
+    const { data: shelves, error } = await supa.from("bk_shelf").select("id, user_id, book:bk_books(id, title, cover_url)")
+      .eq("is_public", true).limit(1000);
+    if (error) throw new Error(error.message);
+    const list = (shelves ?? []) as Record<string, unknown>[];
+    if (!list.length) return json(200, { items: [] });
+    const byShelf = new Map(list.map((x) => [x.id as string, x]));
+    const { data: notes } = await supa.from("bk_notes").select("id, shelf_id, kind, body, page, photo_path, created_at")
+      .in("shelf_id", [...byShelf.keys()]).neq("body", "").order("created_at", { ascending: false }).limit(50);
+    const names = await userMap(list.map((x) => x.user_id as string));
+    const items = (notes ?? []).map((n) => {
+      const sh = byShelf.get(n.shelf_id as string)!;
+      const text = String(n.body ?? "").replace(/\s+/g, " ").trim();
+      return {
+        note_id: n.id, shelf_id: n.shelf_id, kind: n.kind, page: n.page, created_at: n.created_at,
+        has_photo: !!n.photo_path, text: text.length > 200 ? text.slice(0, 200) + "…" : text,
+        book: sh.book ?? null, owner: { user_id: sh.user_id, ...names.get(sh.user_id as string) },
+      };
+    });
+    return json(200, { items });
   },
 
   // ── 사진 모아 보기 ────────────────────────────────────────

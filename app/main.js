@@ -3,6 +3,8 @@ import { api, ApiError, session } from "./api.js";
 import { resetBooks, stopScanner, viewAdd, viewBook, viewConfirm, viewManual, viewScan, viewShelf } from "./books.js";
 import { leaveCapture, resetCapture, viewCapture } from "./capture.js";
 import { resetReading, stopReadingTimers, viewLog, viewTimer } from "./reading.js";
+import { viewStats } from "./stats.js";
+import { resetExplore, viewExplore, viewSharedBook, viewSharedShelf } from "./explore.js";
 import { readingSettingsHtml, resetNotes, viewNote, viewNotes, viewWrite, wireReadingSettings } from "./notes.js";
 import { APP_VERSION } from "./config.js";
 import { busy, confirmBox, formatDate, html, raw, secretBox, toast } from "./ui.js";
@@ -237,21 +239,6 @@ function wireInstall() {
     installEvent = null;
     render();
   });
-}
-
-// ── 준비 중인 탭 ─────────────────────────────────────────
-const SOON = {
-  explore: { title: "둘러보기", h: "회원들이 공개한 책장이 보여요", p: "책마다 공개를 켜면 승인된 회원끼리 서로의 기록을 볼 수 있게 됩니다." },
-  stats: { title: "통계", h: "한 달에 읽은 책과 시간이 보여요", p: "읽은 권수, 읽은 시간, 하루 평균, 이어서 읽은 날을 달마다 보여 드릴 예정이에요." },
-};
-function viewSoon(route) {
-  const s = SOON[route];
-  mount(html`
-    <main class="shell">
-      <header class="topbar"><h1>${s.title}</h1>${raw(meButton())}</header>
-      <section class="soon"><h2>${s.h}</h2><p>${s.p}</p></section>
-    </main>
-    ${raw(tabbar(route))}`);
 }
 
 // ── 나 ──────────────────────────────────────────────────
@@ -505,6 +492,7 @@ async function signOut() {
   resetCapture();
   resetNotes();
   resetReading();
+  resetExplore();
   state.user = null;
   state.pendingCount = 0;
   go("login");
@@ -516,6 +504,7 @@ window.addEventListener("bk:signed-out", (e) => {
   resetCapture();
   resetNotes();
   resetReading();
+  resetExplore();
   stopWaiting();
   viewLogin(e.detail || "다시 로그인해 주세요.");
   history.replaceState(null, "", "#/login");
@@ -552,7 +541,10 @@ function render() {
     case "write": return arg ? viewWrite(ctx, arg) : go("shelf");
     case "note": return arg ? viewNote(ctx, arg) : go("notes");
     case "notes": return viewNotes(ctx);
-    case "explore": case "stats": return viewSoon(route);
+    case "stats": return viewStats(ctx, arg);
+    case "explore": return viewExplore(ctx);
+    case "shared": return arg ? viewSharedShelf(ctx, arg) : viewExplore(ctx);
+    case "shared-book": return arg ? viewSharedBook(ctx, arg) : viewExplore(ctx);
     case "me": return viewMe();
     case "admin": return viewAdmin();
     default: return go("shelf");

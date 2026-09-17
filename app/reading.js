@@ -30,7 +30,7 @@ export function minutesText(m) {
 }
 const kstToday = () => new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
 const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
-function dayText(iso) {
+export function dayText(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   const w = WEEK[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
   return `${y !== Number(kstToday().slice(0, 4)) ? `${y}. ` : ""}${m}. ${d}. (${w})`;

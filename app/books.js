@@ -2,7 +2,7 @@
 import { api } from "./api.js";
 import { markFromBook } from "./capture.js";
 import { mountBookNotes } from "./notes.js";
-import { mountBookLogs, mountRunningBanner } from "./reading.js";
+import { minutesText, mountBookLogs, mountRunningBanner } from "./reading.js";
 import { busy, confirmBox, html, raw, toast } from "./ui.js";
 
 const STATUS = { reading: "읽는 중", want: "읽고 싶은", finished: "다 읽음", stopped: "그만 읽음" };
@@ -101,9 +101,9 @@ export async function viewShelf(ctx) {
         <div id="running-slot"></div>
         <section class="streak" aria-label="이어서 읽은 날">
           <span class="ribbon" aria-hidden="true"></span>
-          <p class="days">0<small>일째</small></p>
+          <p class="days" id="streak-days">·<small>일째</small></p>
           <p class="what">이어서 읽은 날</p>
-          <p class="note">독서 시간을 적은 날부터 하루씩 셉니다.</p>
+          <p class="note" id="streak-note">독서 시간을 적은 날부터 하루씩 셉니다.</p>
         </section>
         <a class="btn btn-primary btn-block" href="#/add">＋ 책 등록하기</a>
         <section class="shelf-section" aria-labelledby="reading-title">
@@ -122,6 +122,15 @@ export async function viewShelf(ctx) {
       ${raw(ctx.tabbar("shelf"))}`);
     decorate(ctx.app);
     mountRunningBanner(ctx, ctx.app.querySelector("#running-slot"));
+    api.stats.streak().then((r) => {
+      if (!ctx.isCurrent("shelf")) return;
+      const days = ctx.app.querySelector("#streak-days");
+      if (!days) return;
+      days.innerHTML = html`${r.streak}<small>일째</small>`;
+      ctx.app.querySelector("#streak-note").textContent = r.today_minutes
+        ? `오늘 ${minutesText(r.today_minutes)} 읽었어요 · 가장 길었던 기록 ${r.best_streak}일`
+        : r.best_streak ? `오늘은 아직이에요 · 가장 길었던 기록 ${r.best_streak}일` : "독서 시간을 적은 날부터 하루씩 셉니다.";
+    }).catch(() => { const d = ctx.app.querySelector("#streak-days"); if (d) d.innerHTML = html`0<small>일째</small>`; });
     ctx.app.querySelectorAll("[data-filter]").forEach((b) => b.addEventListener("click", () => {
       shelfFilter = b.dataset.filter;
       draw(shelfCache || [], false);
@@ -428,6 +437,13 @@ function drawBook(ctx, item) {
       </div>
       <form id="status-form">${raw(statusChips("상태", item.status))}</form>
       <section class="block" id="logs-block"></section>
+      <section class="block" id="public-block">
+        <h2>공개</h2>
+        <div class="switch-row">
+          <label class="switch"><input type="checkbox" role="switch" id="is-public" ${raw(item.is_public ? "checked" : "")}><span class="switch-track" aria-hidden="true"></span><span>이 책 공개하기</span></label>
+          <p class="hint">켜면 승인된 회원이 [둘러보기]에서 이 책의 기록(독서 시간 · 문장 · 사진 · 내 생각) 전체를 볼 수 있어요. 끄면 바로 안 보여요.</p>
+        </div>
+      </section>
       <section class="block" id="notes-block"></section>
       <section class="block">
         <h2>얼마나 읽었나요</h2>
@@ -463,6 +479,15 @@ function drawBook(ctx, item) {
   notesBlock.addEventListener("click", (e) => { if (e.target.closest("[data-start-capture]")) markFromBook(item.id); });
   mountBookNotes(ctx, notesBlock, item.id);
   mountBookLogs(ctx, ctx.app.querySelector("#logs-block"), item);
+  ctx.app.querySelector("#is-public").addEventListener("change", async (e) => {
+    const on = e.target.checked;
+    e.target.disabled = true;
+    try {
+      const r = await api.shelf.update(item.id, { is_public: on });
+      item.is_public = r.item.is_public;
+      toast(on ? "이 책을 공개했어요." : "공개를 껐어요.");
+    } catch (err) { e.target.checked = !on; toast(err.message); } finally { e.target.disabled = false; }
+  });
 
   const save = async (fields, form, button) => {
     const work = async () => {

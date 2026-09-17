@@ -85,6 +85,16 @@ export const api = {
     update: (log_id, fields) => call("bk-api", "/logs/update", { ...fields, log_id }),
     remove: (log_id) => call("bk-api", "/logs/remove", { log_id }),
   },
+  stats: {
+    get: (month) => call("bk-api", "/stats", month ? { month } : {}),
+    streak: () => call("bk-api", "/stats/streak"),
+  },
+  publicShelves: {
+    users: () => call("bk-api", "/public/users"),
+    shelf: (user_id) => call("bk-api", "/public/shelf", { user_id }),
+    book: (shelf_id) => call("bk-api", "/public/book", { shelf_id }),
+    recent: () => call("bk-api", "/public/recent"),
+  },
   photos: {
     list: (shelf_id) => call("bk-api", "/photos/list", shelf_id ? { shelf_id } : {}),
   },
