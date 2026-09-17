@@ -215,6 +215,7 @@ export async function viewScan(ctx) {
       <div class="scanner" id="scanner" hidden>
         <video id="cam" playsinline muted></video>
         <span class="scan-frame" aria-hidden="true"></span>
+        <button class="torch" type="button" id="torch" hidden aria-pressed="false">손전등</button>
       </div>
       <p class="scan-help" id="scan-help" role="status">카메라를 켜는 중…</p>
       <button class="btn btn-quiet" type="button" id="rescan" hidden>다시 찍기</button>
@@ -260,7 +261,10 @@ export async function viewScan(ctx) {
   }
   let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false,
+    });
   } catch (e) {
     return unsupported(e && e.name === "NotAllowedError"
       ? "카메라 사용이 막혀 있어요. 크롬 주소창 왼쪽 아이콘 → 권한에서 카메라를 허용한 뒤 [다시 찍기]를 눌러 주세요."
@@ -269,11 +273,26 @@ export async function viewScan(ctx) {
   if (!ctx.isCurrent("scan")) { stream.getTracks().forEach((t) => t.stop()); return; }
   let alive = true;
   scanStop = () => { alive = false; stream.getTracks().forEach((t) => t.stop()); };
+  // 자동 초점 · 약간 확대 (폰이 지원할 때만). 가까이 대지 않아도 바코드가 크고 또렷하게 찍히게 함
+  const track = stream.getVideoTracks()[0];
+  const caps = track && track.getCapabilities ? track.getCapabilities() : {};
+  const adv = {};
+  if (caps.focusMode && caps.focusMode.includes("continuous")) adv.focusMode = "continuous";
+  if (caps.zoom && caps.zoom.max >= 1.5) adv.zoom = Math.min(2, caps.zoom.max);
+  if (Object.keys(adv).length) { try { await track.applyConstraints({ advanced: [adv] }); } catch { /* 지원 안 하면 그대로 */ } }
+  if (caps.torch) {
+    const torch = ctx.app.querySelector("#torch");
+    torch.hidden = false;
+    torch.addEventListener("click", async () => {
+      const on = torch.getAttribute("aria-pressed") !== "true";
+      try { await track.applyConstraints({ advanced: [{ torch: on }] }); torch.setAttribute("aria-pressed", String(on)); } catch { /* 무시 */ }
+    });
+  }
   const video = ctx.app.querySelector("#cam");
   video.srcObject = stream;
   ctx.app.querySelector("#scanner").hidden = false;
   try { await video.play(); } catch { /* 자동 재생 막힘은 무시 */ }
-  help.textContent = "책 뒷면 바코드를 네모 안에 비춰 주세요.";
+  help.textContent = "바코드가 노란 네모에 가득 차게, 흔들리지 않게 비춰 주세요. 어두우면 손전등을 켜세요.";
   const detector = new window.BarcodeDetector({ formats: ["ean_13"] });
   const tick = async () => {
     if (!alive) return;
@@ -289,7 +308,7 @@ export async function viewScan(ctx) {
         return;
       }
     } catch { /* 한 장면 인식 실패는 넘어감 */ }
-    setTimeout(tick, 250);
+    setTimeout(tick, 120);
   };
   tick();
 }

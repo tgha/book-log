@@ -30,6 +30,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
@@ -282,13 +283,18 @@ dialog .actions { display: flex; gap: .5rem; justify-content: flex-end; flex-wra
 #results { margin-top: 1rem; }
 #more { margin-top: 1rem; }
 
-.scanner { position: relative; margin: .5rem 0 1rem; border-radius: 14px; overflow: hidden; background: #0b1220; aspect-ratio: 4 / 3; }
+.scanner { position: relative; margin: .5rem 0 1rem; border-radius: 14px; overflow: hidden; background: #0b1220; aspect-ratio: 1 / 1; }
 .scanner video { inline-size: 100%; block-size: 100%; object-fit: cover; display: block; }
 .scan-frame {
-  position: absolute; left: 12%; right: 12%; top: 34%; bottom: 34%;
+  position: absolute; left: 5%; right: 5%; top: 24%; bottom: 24%;
   border: 3px solid var(--ribbon); border-radius: 10px; box-shadow: 0 0 0 999px rgba(11, 18, 32, .35);
 }
 .scan-help { margin: .5rem 0 1rem; color: var(--pencil); }
+.torch {
+  position: absolute; right: .75rem; bottom: .75rem; min-block-size: 2.6rem; padding: .35rem 1rem; border-radius: 999px;
+  border: 0; background: rgba(255, 255, 255, .92); color: var(--ink); font-weight: 600; cursor: pointer;
+}
+.torch[aria-pressed="true"] { background: var(--ribbon); }
 #rescan { margin-bottom: 1.5rem; }
 #isbn-form { margin-top: 1rem; }
 
