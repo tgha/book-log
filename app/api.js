@@ -75,6 +75,16 @@ export const api = {
     remove: (note_id) => call("bk-api", "/notes/remove", { note_id }),
     removePhoto: (note_id) => call("bk-api", "/notes/photo-remove", { note_id }),
   },
+  logs: {
+    running: () => call("bk-api", "/logs/running"),
+    start: (shelf_id) => call("bk-api", "/logs/start", { shelf_id }),
+    stop: (log_id, fields) => call("bk-api", "/logs/stop", { ...fields, log_id }),
+    cancel: (log_id) => call("bk-api", "/logs/cancel", { log_id }),
+    add: (body) => call("bk-api", "/logs/add", body),
+    list: (shelf_id) => call("bk-api", "/logs/list", { shelf_id }),
+    update: (log_id, fields) => call("bk-api", "/logs/update", { ...fields, log_id }),
+    remove: (log_id) => call("bk-api", "/logs/remove", { log_id }),
+  },
   photos: {
     list: (shelf_id) => call("bk-api", "/photos/list", shelf_id ? { shelf_id } : {}),
   },

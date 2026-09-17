@@ -2,6 +2,7 @@
 import { api, ApiError, session } from "./api.js";
 import { resetBooks, stopScanner, viewAdd, viewBook, viewConfirm, viewManual, viewScan, viewShelf } from "./books.js";
 import { leaveCapture, resetCapture, viewCapture } from "./capture.js";
+import { resetReading, stopReadingTimers, viewLog, viewTimer } from "./reading.js";
 import { readingSettingsHtml, resetNotes, viewNote, viewNotes, viewWrite, wireReadingSettings } from "./notes.js";
 import { APP_VERSION } from "./config.js";
 import { busy, confirmBox, formatDate, html, raw, secretBox, toast } from "./ui.js";
@@ -503,6 +504,7 @@ async function signOut() {
   resetBooks();
   resetCapture();
   resetNotes();
+  resetReading();
   state.user = null;
   state.pendingCount = 0;
   go("login");
@@ -513,6 +515,7 @@ window.addEventListener("bk:signed-out", (e) => {
   resetBooks();
   resetCapture();
   resetNotes();
+  resetReading();
   stopWaiting();
   viewLogin(e.detail || "다시 로그인해 주세요.");
   history.replaceState(null, "", "#/login");
@@ -524,6 +527,7 @@ function render() {
   const route = currentRoute();
   stopScanner();
   leaveCapture();
+  stopReadingTimers();
   if (route !== "pending") stopWaiting();
   if (!state.user) {
     if (route === "signup") return viewSignup();
@@ -543,6 +547,8 @@ function render() {
     case "add-manual": return viewManual(ctx);
     case "book": return arg ? viewBook(ctx, arg) : go("shelf");
     case "capture": return viewCapture(ctx, arg, sub);
+    case "timer": return viewTimer(ctx);
+    case "log": return arg ? viewLog(ctx, arg, sub) : go("shelf");
     case "write": return arg ? viewWrite(ctx, arg) : go("shelf");
     case "note": return arg ? viewNote(ctx, arg) : go("notes");
     case "notes": return viewNotes(ctx);

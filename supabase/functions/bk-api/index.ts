@@ -1,4 +1,4 @@
-// bk-api — 내 서재 · 메모 · 사진 (v3, 2026-09-17 · 3단계)
+// bk-api — 내 서재 · 메모 · 사진 · 독서 시간 (v4, 2026-09-17 · 4단계)
 //   /shelf/list          내 서재 목록
 //   /shelf/add           서재에 책 넣기 (ISBN → 카카오 정보로 저장 / 직접 입력)
 //   /shelf/get           책 한 권 자세히
@@ -11,6 +11,14 @@
 //   /notes/remove        메모 지우기 (밑줄 · 사진도)
 //   /notes/photo-remove  메모에 남긴 사진만 지우기
 //   /photos/list         남긴 사진 모아 보기 (볼 때만 잠깐 열리는 주소 포함)
+//   /logs/running        돌고 있는 타이머 (없으면 null) + 서버 시각
+//   /logs/start          타이머 시작 (한 사람 하나)
+//   /logs/stop           타이머 멈추고 저장 (읽은 분 · 끝낸 쪽)
+//   /logs/cancel         타이머를 기록하지 않고 끝내기
+//   /logs/add            손으로 적기 (날짜 · 분 · 끝낸 쪽)
+//   /logs/list           책 한 권의 독서 시간 목록 · 합계
+//   /logs/update         독서 시간 고치기
+//   /logs/remove         독서 시간 지우기
 //   /highlights/*        (1.3.0 부터 화면에서 안 씀, 남겨 둠)
 //   /highlights/list     밑줄 모아 보기
 //   /highlights/add      저장된 메모에 밑줄 더하기
@@ -172,6 +180,46 @@ async function removePhotos(paths: string[]) {
 /** 기록을 남기면 서재 목록에서 그 책이 위로 오게 */
 async function touchShelf(shelfId: string) {
   await supa.from("bk_shelf").update({ updated_at: new Date().toISOString() }).eq("id", shelfId);
+}
+
+// ── 독서 시간 도우미 (4단계) ──────────────────────────────────
+const LOG_SELECT = "id, shelf_id, method, started_at, ended_at, minutes, read_on, end_page, created_at, shelf:bk_shelf(id, status, started_on, total_pages, current_page, book:bk_books(id, title, authors, cover_url))";
+
+/** 시각 → 한국 날짜 (자정을 넘겨 읽어도 시작한 날로 친다) */
+function kstDateOf(d: Date): string {
+  return new Date(d.getTime() + 9 * 3600000).toISOString().slice(0, 10);
+}
+
+function readMinutes(v: unknown): number {
+  const n = Number(v);
+  if (v === null || v === undefined || v === "" || !Number.isInteger(n) || n < 0 || n > 1440) {
+    throw new UserError(400, "읽은 시간은 1~1440분(24시간) 사이 숫자로 적어 주세요.");
+  }
+  return n;
+}
+
+function readEndPage(v: unknown, shelf: Record<string, unknown> | null): number | null {
+  const p = pages(v, "끝낸 쪽");
+  const total = shelf?.total_pages as number | null | undefined;
+  if (p !== null && total && p > total) throw new UserError(400, `끝낸 쪽이 전체 쪽수(${total}쪽)보다 많아요.`);
+  return p;
+}
+
+/** 끝낸 쪽이 지금 읽은 쪽보다 뒤면 서재의 「읽은 쪽」도 옮긴다 */
+async function moveCurrentPage(shelf: Record<string, unknown>, endPage: number | null, userId: string) {
+  const upd: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  const cur = shelf.current_page as number | null;
+  if (endPage !== null && (cur === null || cur === undefined || endPage > cur)) upd.current_page = endPage;
+  await supa.from("bk_shelf").update(upd).eq("id", shelf.id).eq("user_id", userId);
+}
+
+async function ownLog(body: Record<string, unknown>, userId: string) {
+  const id = str(body, "log_id", 40);
+  if (!UUID.test(id)) throw new UserError(400, "독서 기록을 골라 주세요.");
+  const { data, error } = await supa.from("bk_reading_logs").select(LOG_SELECT).eq("id", id).eq("user_id", userId).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new UserError(404, "독서 기록을 찾을 수 없어요. 이미 지웠을 수 있어요.", "NOT_FOUND");
+  return data as Record<string, unknown>;
 }
 
 serve("bk-api", {
@@ -390,6 +438,126 @@ serve("bk-api", {
     if (error) throw new Error(error.message);
     await removePhotos([note.photo_path as string]);
     return json(200, { item: noteOut(await ownNote(body, user.id)) });
+  },
+
+  // ── 독서 시간 (4단계) ─────────────────────────────────────
+  "/logs/running": async (_req, body) => {
+    const { user } = await requireApproved(body);
+    const { data, error } = await supa.from("bk_reading_logs").select(LOG_SELECT)
+      .eq("user_id", user.id).eq("method", "timer").is("ended_at", null).maybeSingle();
+    if (error) throw new Error(error.message);
+    return json(200, { item: data ?? null, now: new Date().toISOString() });
+  },
+
+  "/logs/start": async (_req, body) => {
+    const { user } = await requireApproved(body);
+    const shelf = await ownShelf(body, user.id);
+    const running = async () => {
+      const { data } = await supa.from("bk_reading_logs").select(LOG_SELECT)
+        .eq("user_id", user.id).eq("method", "timer").is("ended_at", null).maybeSingle();
+      return data as Record<string, unknown> | null;
+    };
+    const busyWith = (r: Record<string, unknown>) => {
+      const t = ((r.shelf as Record<string, unknown> | null)?.book as Record<string, unknown> | null)?.title ?? "다른 책";
+      return new UserError(409, r.shelf_id === shelf.id ? "이 책 타이머가 이미 돌고 있어요." : `「${t}」 타이머가 돌고 있어요. 그 타이머를 먼저 멈춰 주세요.`, "RUNNING:" + r.shelf_id);
+    };
+    const already = await running();
+    if (already) throw busyWith(already);
+    const now = new Date();
+    const { data, error } = await supa.from("bk_reading_logs").insert({
+      user_id: user.id, shelf_id: shelf.id, method: "timer", started_at: now.toISOString(), read_on: kstDateOf(now),
+    }).select(LOG_SELECT).single();
+    if (error?.code === "23505") { const r = await running(); if (r) throw busyWith(r); }
+    if (error || !data) throw new Error("타이머 시작 실패: " + error?.message);
+    // 읽고 싶은 · 그만 읽은 책을 읽기 시작하면 「읽는 중」으로
+    if (shelf.status === "want" || shelf.status === "stopped") {
+      await supa.from("bk_shelf").update({ status: "reading", started_on: shelf.started_on ?? kstToday(), updated_at: now.toISOString() })
+        .eq("id", shelf.id).eq("user_id", user.id);
+    } else await touchShelf(shelf.id as string);
+    return json(200, { item: data, now: now.toISOString() });
+  },
+
+  "/logs/stop": async (_req, body) => {
+    const { user } = await requireApproved(body);
+    const log = await ownLog(body, user.id);
+    if (log.method !== "timer" || log.ended_at) throw new UserError(409, "이미 끝난 타이머예요. 목록을 새로 불러와 주세요.", "NOT_RUNNING");
+    const now = new Date();
+    const elapsed = (now.getTime() - new Date(log.started_at as string).getTime()) / 60000;
+    let minutes: number;
+    if (body.minutes === undefined || body.minutes === null || body.minutes === "") minutes = Math.min(1440, Math.round(elapsed));
+    else {
+      minutes = readMinutes(body.minutes);
+      if (minutes > Math.ceil(elapsed) + 1) throw new UserError(400, "읽은 시간이 타이머보다 길어요. 다시 확인해 주세요.");
+    }
+    if (minutes < 1) throw new UserError(400, "1분 이상 읽었을 때 저장할 수 있어요. 기록하지 않으려면 [기록하지 않고 끝내기]를 눌러 주세요.", "TOO_SHORT");
+    const shelf = log.shelf as Record<string, unknown>;
+    const endPage = readEndPage(body.end_page, shelf);
+    const { error } = await supa.from("bk_reading_logs").update({ ended_at: now.toISOString(), minutes, end_page: endPage })
+      .eq("id", log.id).eq("user_id", user.id).is("ended_at", null);
+    if (error) throw new Error("타이머 저장 실패: " + error.message);
+    await moveCurrentPage(shelf, endPage, user.id);
+    return json(200, { item: await ownLog(body, user.id) });
+  },
+
+  "/logs/cancel": async (_req, body) => {
+    const { user } = await requireApproved(body);
+    const log = await ownLog(body, user.id);
+    if (log.method !== "timer" || log.ended_at) throw new UserError(409, "이미 끝난 타이머예요. 목록을 새로 불러와 주세요.", "NOT_RUNNING");
+    const { error } = await supa.from("bk_reading_logs").delete().eq("id", log.id).eq("user_id", user.id);
+    if (error) throw new Error(error.message);
+    return json(200, { ok: true });
+  },
+
+  "/logs/add": async (_req, body) => {
+    const { user } = await requireApproved(body);
+    const shelf = await ownShelf(body, user.id);
+    const readOn = dateOrNull(body.read_on, "읽은 날") ?? kstToday();
+    const minutes = readMinutes(body.minutes);
+    if (minutes < 1) throw new UserError(400, "읽은 시간은 1분 이상으로 적어 주세요.");
+    const endPage = readEndPage(body.end_page, shelf);
+    const { data, error } = await supa.from("bk_reading_logs").insert({
+      user_id: user.id, shelf_id: shelf.id, method: "manual", minutes, read_on: readOn, end_page: endPage,
+    }).select(LOG_SELECT).single();
+    if (error || !data) throw new Error("독서 시간 저장 실패: " + error?.message);
+    await moveCurrentPage(shelf, endPage, user.id);
+    return json(200, { item: data });
+  },
+
+  "/logs/list": async (_req, body) => {
+    const { user } = await requireApproved(body);
+    const shelf = await ownShelf(body, user.id);
+    const { data, error } = await supa.from("bk_reading_logs")
+      .select("id, shelf_id, method, started_at, ended_at, minutes, read_on, end_page, created_at")
+      .eq("user_id", user.id).eq("shelf_id", shelf.id).not("minutes", "is", null)
+      .order("read_on", { ascending: false }).order("created_at", { ascending: false }).limit(500);
+    if (error) throw new Error(error.message);
+    const items = (data ?? []).filter((x) => x.method === "manual" || x.ended_at);
+    return json(200, { items, total_minutes: items.reduce((a, x) => a + (x.minutes ?? 0), 0) });
+  },
+
+  "/logs/update": async (_req, body) => {
+    const { user } = await requireApproved(body);
+    const log = await ownLog(body, user.id);
+    if (log.method === "timer" && !log.ended_at) throw new UserError(409, "돌고 있는 타이머는 고칠 수 없어요. 먼저 멈춰 주세요.", "RUNNING");
+    const upd: Record<string, unknown> = {};
+    if ("read_on" in body) upd.read_on = dateOrNull(body.read_on, "읽은 날") ?? log.read_on;
+    if ("minutes" in body) {
+      const m = readMinutes(body.minutes);
+      if (m < 1) throw new UserError(400, "읽은 시간은 1분 이상으로 적어 주세요.");
+      upd.minutes = m;
+    }
+    if ("end_page" in body) upd.end_page = readEndPage(body.end_page, log.shelf as Record<string, unknown>);
+    const { error } = await supa.from("bk_reading_logs").update(upd).eq("id", log.id).eq("user_id", user.id);
+    if (error) throw new Error("독서 시간 저장 실패: " + error.message);
+    return json(200, { item: await ownLog(body, user.id) });
+  },
+
+  "/logs/remove": async (_req, body) => {
+    const { user } = await requireApproved(body);
+    const log = await ownLog(body, user.id);
+    const { error } = await supa.from("bk_reading_logs").delete().eq("id", log.id).eq("user_id", user.id);
+    if (error) throw new Error(error.message);
+    return json(200, { ok: true });
   },
 
   // ── 사진 모아 보기 ────────────────────────────────────────

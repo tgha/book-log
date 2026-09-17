@@ -2,6 +2,7 @@
 import { api } from "./api.js";
 import { markFromBook } from "./capture.js";
 import { mountBookNotes } from "./notes.js";
+import { mountBookLogs, mountRunningBanner } from "./reading.js";
 import { busy, confirmBox, html, raw, toast } from "./ui.js";
 
 const STATUS = { reading: "읽는 중", want: "읽고 싶은", finished: "다 읽음", stopped: "그만 읽음" };
@@ -97,6 +98,7 @@ export async function viewShelf(ctx) {
       <main class="shell">
         <header class="topbar"><h1>${u.display_name}님의 서재</h1>${raw(ctx.meButton())}</header>
         ${raw(ctx.pendingNote())}
+        <div id="running-slot"></div>
         <section class="streak" aria-label="이어서 읽은 날">
           <span class="ribbon" aria-hidden="true"></span>
           <p class="days">0<small>일째</small></p>
@@ -119,6 +121,7 @@ export async function viewShelf(ctx) {
       </main>
       ${raw(ctx.tabbar("shelf"))}`);
     decorate(ctx.app);
+    mountRunningBanner(ctx, ctx.app.querySelector("#running-slot"));
     ctx.app.querySelectorAll("[data-filter]").forEach((b) => b.addEventListener("click", () => {
       shelfFilter = b.dataset.filter;
       draw(shelfCache || [], false);
@@ -424,6 +427,7 @@ function drawBook(ctx, item) {
         <div><h1 class="book-h1">${b.title}</h1><p class="book-by">${byline(b)}</p><p class="book-by">${publine(b)}</p></div>
       </div>
       <form id="status-form">${raw(statusChips("상태", item.status))}</form>
+      <section class="block" id="logs-block"></section>
       <section class="block" id="notes-block"></section>
       <section class="block">
         <h2>얼마나 읽었나요</h2>
@@ -448,13 +452,7 @@ function drawBook(ctx, item) {
           <button class="btn btn-quiet" type="submit">날짜 저장</button>
         </form>
       </section>
-      <section class="block">
-        <h2>독서 시간</h2>
-        <div class="soon-actions">
-          <button class="btn btn-quiet" type="button" disabled>독서 시작</button>
-        </div>
-        <p class="book-by">독서 시간 재기는 다음 업데이트에서 열려요.</p>
-      </section>
+
       ${raw(b.description ? html`<section class="block"><h2>책 소개</h2><p class="book-desc">${b.description}</p></section>` : "")}
       <section class="block">
         <button class="btn btn-warn" type="button" id="remove">서재에서 빼기</button>
@@ -464,6 +462,7 @@ function drawBook(ctx, item) {
   const notesBlock = ctx.app.querySelector("#notes-block");
   notesBlock.addEventListener("click", (e) => { if (e.target.closest("[data-start-capture]")) markFromBook(item.id); });
   mountBookNotes(ctx, notesBlock, item.id);
+  mountBookLogs(ctx, ctx.app.querySelector("#logs-block"), item);
 
   const save = async (fields, form, button) => {
     const work = async () => {

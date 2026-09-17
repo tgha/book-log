@@ -484,3 +484,45 @@ dialog.photo-dialog { inline-size: min(34rem, calc(100vw - 1rem)); padding: .75r
 .usage-row { display: grid; gap: .1rem; padding: .7rem 0; }
 .usage-row .person-meta { margin: 0; }
 .usage-row small { color: var(--pencil); font-weight: 400; }
+
+/* ── 4단계: 독서 시간 ─────────────────────────────────
+   한 가지 큰 표시: 잉크색 큰 시계 숫자 (책갈피 금색 점이 「읽는 중」) */
+.running-banner {
+  display: flex; align-items: center; gap: .6rem; margin: 0 0 1rem; padding: .8rem 1rem; border-radius: 12px;
+  background: var(--ink); color: #fff; text-decoration: none;
+}
+.running-dot { flex: none; inline-size: .6rem; block-size: .6rem; border-radius: 50%; background: var(--ribbon); animation: breathe 2s ease-in-out infinite; }
+@keyframes breathe { 50% { opacity: .35; } }
+.running-title { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.running-clock { font: 600 1.125rem/1 var(--sans); font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+#logs-block .running-banner { margin-bottom: .75rem; }
+
+.timer { text-align: center; }
+.timer .topbar { text-align: left; }
+.timer-state { margin: 2.5rem 0 .25rem; color: var(--pencil); font-weight: 600; letter-spacing: .08em; }
+.clock {
+  margin: 0 0 .75rem; font: 700 clamp(3.5rem, 19vw, 5.5rem)/1 var(--sans); font-variant-numeric: tabular-nums;
+  letter-spacing: -.02em; color: var(--ink);
+}
+.btn-big { min-block-size: 4rem; font-size: 1.25rem; margin-top: 2rem; border-radius: 14px; }
+.stop-form { margin-top: 1.5rem; text-align: left; }
+.stop-summary { margin: 0; font: 700 var(--step-1)/1.4 var(--serif); text-align: center; }
+.stop-form .link-btn { justify-self: start; }
+
+.log-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+.log-list > li { border-bottom: 1px solid var(--rule); }
+.log-row {
+  display: grid; grid-template-columns: 1fr auto; grid-template-areas: "day min" "page how"; gap: .1rem .75rem;
+  padding: .75rem 0; color: inherit; text-decoration: none;
+}
+.log-day { grid-area: day; font-weight: 500; }
+.log-min { grid-area: min; font: 600 1.0625rem/1.4 var(--sans); font-variant-numeric: tabular-nums; text-align: right; }
+.log-page { grid-area: page; color: var(--pencil); font-size: var(--step--1); }
+.log-how { grid-area: how; color: var(--pencil); font-size: var(--step--1); text-align: right; }
+.quick-min { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .45rem; }
+.chip-btn {
+  min-block-size: 2.4rem; padding: .3rem .85rem; border-radius: 999px; border: 1.5px solid var(--rule);
+  background: var(--leaf); font-weight: 500; cursor: pointer;
+}
+.chip-btn:active { background: var(--cloth-tint); }
+#log-remove { margin-top: .5rem; }
