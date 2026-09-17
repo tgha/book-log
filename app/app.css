@@ -238,3 +238,74 @@ dialog .actions { display: flex; gap: .5rem; justify-content: flex-end; flex-wra
 @media (min-width: 48rem) {
   .gate, .waiting { padding-top: 16vh; }
 }
+
+/* ── 2단계: 책 · 서재 ─────────────────────── */
+.shell > .btn-block[href="#/add"] { margin-bottom: 1.75rem; }
+.shelf-section { margin-bottom: 2rem; }
+.section-title .count { font: 500 var(--step--1)/1 var(--sans); color: var(--pencil); margin-left: .25rem; }
+.empty-line { margin: .25rem 0 0; padding: 1rem 0; color: var(--pencil); border-top: 1px solid var(--rule); }
+
+.book-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+.book-list > li { border-bottom: 1px solid var(--rule); }
+.book-row {
+  display: flex; gap: 1rem; align-items: flex-start; inline-size: 100%; padding: .9rem 0;
+  color: inherit; text-decoration: none; background: none; border: 0; text-align: left; cursor: pointer; font: inherit;
+}
+.book-text { display: grid; gap: .15rem; min-inline-size: 0; flex: 1; }
+.book-title { font: 700 1.0625rem/1.35 var(--serif); overflow-wrap: anywhere; }
+.book-by { color: var(--pencil); font-size: var(--step--1); margin: 0; overflow-wrap: anywhere; }
+.tag { justify-self: start; margin-top: .25rem; font-size: .75rem; font-weight: 600; padding: .1rem .5rem; border-radius: 999px; background: var(--cloth-tint); color: var(--cloth-deep); }
+
+.cover {
+  flex: none; inline-size: 3.5rem; block-size: 5rem; object-fit: cover; border-radius: 3px;
+  background: var(--cloth-tint); box-shadow: 0 1px 0 rgba(29, 41, 57, .08), 2px 0 0 rgba(29, 41, 57, .06) inset;
+}
+.cover-blank {
+  display: flex; align-items: flex-end; padding: .35rem; background: var(--cloth); color: #fff;
+  font: 700 .625rem/1.25 var(--serif); overflow: hidden; border-left: 3px solid var(--cloth-deep);
+}
+.cover-lg { inline-size: 6.5rem; block-size: 9.25rem; }
+.cover-lg.cover-blank { font-size: .875rem; padding: .6rem; }
+
+.progress { display: block; block-size: .375rem; margin: .45rem 0 .15rem; border-radius: 999px; background: var(--rule); overflow: hidden; max-inline-size: 16rem; }
+.progress .bar { display: block; block-size: 100%; inline-size: 0; background: var(--ribbon); border-radius: inherit; }
+.block > .progress { max-inline-size: none; margin-top: 0; }
+
+.add-ways { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin: .5rem 0 1.75rem; }
+.way {
+  display: grid; gap: .25rem; padding: 1rem; border-radius: 12px; background: var(--leaf); border: 1.5px solid var(--rule);
+  color: inherit; text-decoration: none;
+}
+.way strong { font: 700 1.0625rem/1.3 var(--serif); color: var(--cloth); }
+.way span { font-size: var(--step--1); color: var(--pencil); }
+.grow { flex: 1; }
+#results { margin-top: 1rem; }
+#more { margin-top: 1rem; }
+
+.scanner { position: relative; margin: .5rem 0 1rem; border-radius: 14px; overflow: hidden; background: #0b1220; aspect-ratio: 4 / 3; }
+.scanner video { inline-size: 100%; block-size: 100%; object-fit: cover; display: block; }
+.scan-frame {
+  position: absolute; left: 12%; right: 12%; top: 34%; bottom: 34%;
+  border: 3px solid var(--ribbon); border-radius: 10px; box-shadow: 0 0 0 999px rgba(11, 18, 32, .35);
+}
+.scan-help { margin: .5rem 0 1rem; color: var(--pencil); }
+#rescan { margin-bottom: 1.5rem; }
+#isbn-form { margin-top: 1rem; }
+
+.chips { border: 0; margin: 0 0 .5rem; padding: 0; display: flex; flex-wrap: wrap; gap: .5rem; }
+.chips legend { font-weight: 500; font-size: var(--step--1); margin-bottom: .5rem; padding: 0; }
+.chip { position: relative; }
+.chip input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.chip span {
+  display: inline-flex; align-items: center; min-block-size: 2.6rem; padding: .35rem 1rem; border-radius: 999px;
+  border: 1.5px solid var(--rule); background: var(--leaf); font-weight: 500;
+}
+.chip input:checked + span { background: var(--cloth); border-color: var(--cloth); color: #fff; }
+.chip input:focus-visible + span { outline: 3px solid var(--ribbon); outline-offset: 2px; }
+
+.book-head { display: flex; gap: 1.1rem; align-items: flex-end; margin: .25rem 0 1.25rem; }
+.book-h1 { margin: 0 0 .35rem; font: 700 1.5rem/1.3 var(--serif); overflow-wrap: anywhere; }
+.book-desc { margin: 0 0 1.5rem; color: var(--ink); font: 400 .9375rem/1.75 var(--serif); }
+#status-form { margin-bottom: .5rem; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+.soon-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .5rem; }

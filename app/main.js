@@ -1,5 +1,6 @@
-// book-log 화면 (1단계: 가입 · 로그인 · 승인 대기 · 서재 · 나 · 관리자)
+// book-log 화면 (1단계: 가입 · 로그인 · 승인 대기 · 나 · 관리자 / 2단계 화면은 books.js)
 import { api, ApiError, session } from "./api.js";
+import { resetBooks, stopScanner, viewAdd, viewBook, viewConfirm, viewManual, viewScan, viewShelf } from "./books.js";
 import { APP_VERSION } from "./config.js";
 import { busy, confirmBox, formatDate, html, raw, secretBox, toast } from "./ui.js";
 
@@ -209,12 +210,14 @@ let installEvent = null;
 window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installEvent = e; });
 const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 
-function viewShelf() {
-  const u = state.user;
-  const pendingNote = u.is_admin && state.pendingCount > 0
+function pendingNote() {
+  return state.user.is_admin && state.pendingCount > 0
     ? html`<div class="notice"><p>승인을 기다리는 회원이 ${state.pendingCount}명 있어요.</p><button class="btn btn-primary btn-small" data-go="admin">보기</button></div>`
     : "";
-  const install = isStandalone() ? "" : html`
+}
+
+function installBlock() {
+  return isStandalone() ? "" : html`
     <section class="install" aria-labelledby="install-title">
       <h2 class="section-title" id="install-title">홈 화면에 붙이기</h2>
       <p>홈 화면에 붙이면 주소창 없이 앱처럼 열려요.</p>
@@ -222,27 +225,9 @@ function viewShelf() {
         ? '<button class="btn btn-quiet" id="install">홈 화면에 추가</button>'
         : "<p>크롬 오른쪽 위 ⋮ 메뉴에서 「홈 화면에 추가」를 누르세요.</p>")}
     </section>`;
-  mount(html`
-    <main class="shell">
-      <header class="topbar"><h1>${u.display_name}님의 서재</h1>${raw(meButton())}</header>
-      ${raw(pendingNote)}
-      <section class="streak" aria-label="이어서 읽은 날">
-        <span class="ribbon" aria-hidden="true"></span>
-        <p class="days">0<small>일째</small></p>
-        <p class="what">이어서 읽은 날</p>
-        <p class="note">독서 시간을 적은 날부터 하루씩 셉니다.</p>
-      </section>
-      <section aria-labelledby="reading-title">
-        <h2 class="section-title" id="reading-title">읽고 있는 책</h2>
-        <div class="empty">
-          <p>아직 서재에 책이 없어요.</p>
-          <p class="sub">바코드나 제목으로 책을 찾아 넣는 기능이 곧 열립니다.</p>
-          <button class="btn btn-primary" disabled>책 등록하기</button>
-        </div>
-      </section>
-      ${raw(install)}
-    </main>
-    ${raw(tabbar("shelf"))}`);
+}
+
+function wireInstall() {
   app.querySelector("#install")?.addEventListener("click", async () => {
     installEvent.prompt();
     await installEvent.userChoice;
@@ -455,6 +440,13 @@ async function loadSettings() {
   });
 }
 
+// ── 2단계 화면에 넘겨 주는 도구 모음 ──────────────────────
+const ctx = {
+  app, state, mount, go, tabbar, meButton, field, showError, pendingNote, installBlock,
+  afterShelfMount: wireInstall,
+  isCurrent: (r) => currentRoute() === r,
+};
+
 // ── 로그인 흐름 · 길 찾기 ────────────────────────────────
 async function refreshPendingCount() {
   if (!state.user?.is_admin) return;
@@ -480,6 +472,7 @@ async function signOut() {
   stopWaiting();
   try { await api.logout(); } catch { /* 이미 끊긴 출입증 */ }
   session.clear();
+  resetBooks();
   state.user = null;
   state.pendingCount = 0;
   go("login");
@@ -487,6 +480,7 @@ async function signOut() {
 
 window.addEventListener("bk:signed-out", (e) => {
   state.user = null;
+  resetBooks();
   stopWaiting();
   viewLogin(e.detail || "다시 로그인해 주세요.");
   history.replaceState(null, "", "#/login");
@@ -496,6 +490,7 @@ const currentRoute = () => (location.hash.replace(/^#\/?/, "").split("?")[0] || 
 
 function render() {
   const route = currentRoute();
+  stopScanner();
   if (route !== "pending") stopWaiting();
   if (!state.user) {
     if (route === "signup") return viewSignup();
@@ -506,8 +501,14 @@ function render() {
     if (route !== "pending") history.replaceState(null, "", "#/pending");
     return viewPending();
   }
-  switch (route) {
-    case "shelf": return viewShelf();
+  const [head, arg] = route.split("/");
+  switch (head) {
+    case "shelf": return viewShelf(ctx);
+    case "add": return viewAdd(ctx);
+    case "scan": return viewScan(ctx);
+    case "add-confirm": return viewConfirm(ctx);
+    case "add-manual": return viewManual(ctx);
+    case "book": return arg ? viewBook(ctx, arg) : go("shelf");
     case "notes": case "explore": case "stats": return viewSoon(route);
     case "me": return viewMe();
     case "admin": return viewAdmin();

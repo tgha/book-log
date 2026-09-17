@@ -1,8 +1,8 @@
 // book-log 서비스 워커: 앱 화면 파일을 기기에 담아 두어 빨리 열리게 함.
 // 서버(Supabase) 요청은 담아 두지 않는다. 새 버전을 올리면 CACHE 이름을 바꾼다.
-const CACHE = "bk-shell-1.0.0";
+const CACHE = "bk-shell-1.1.0";
 const SHELL = [
-  "/", "/index.html", "/app/app.css", "/app/main.js", "/app/api.js", "/app/ui.js", "/app/config.js",
+  "/", "/index.html", "/app/app.css", "/app/main.js", "/app/api.js", "/app/ui.js", "/app/config.js", "/app/books.js",
   "/manifest.webmanifest", "/icons/icon-192.png", "/icons/favicon-48.png",
 ];
 

@@ -201,3 +201,70 @@ export function serve(fnName: string, routes: Record<string, (req: Request, body
     }
   });
 }
+
+// ── 책 검색 (카카오) · ISBN ─────────────────────────────────────────
+// 열쇠는 Supabase 비밀값 BK_KAKAO_REST_KEY 에만 있다. 화면으로는 절대 내보내지 않는다.
+export type BookInfo = {
+  isbn13: string | null; title: string; authors: string[]; translators: string[];
+  publisher: string | null; published_on: string | null; cover_url: string | null; description: string | null;
+};
+
+/** ISBN-13 모양과 끝자리 검산 */
+export function validIsbn13(s: string): boolean {
+  if (!/^97[89]\d{10}$/.test(s)) return false;
+  const d = s.split("").map(Number);
+  const sum = d.slice(0, 12).reduce((a, n, i) => a + n * (i % 2 ? 3 : 1), 0);
+  return (10 - (sum % 10)) % 10 === d[12];
+}
+
+function clean(s: unknown, max: number): string {
+  return typeof s === "string" ? s.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim().slice(0, max) : "";
+}
+
+function normalizeKakao(d: Record<string, unknown>): BookInfo {
+  const isbn13 = String(d.isbn ?? "").split(/\s+/).find((x) => /^\d{13}$/.test(x)) ?? null;
+  const thumb = clean(d.thumbnail, 500);
+  const dt = clean(d.datetime, 40);
+  return {
+    isbn13,
+    title: clean(d.title, 200),
+    authors: (Array.isArray(d.authors) ? d.authors : []).map((a) => clean(a, 60)).filter(Boolean).slice(0, 10),
+    translators: (Array.isArray(d.translators) ? d.translators : []).map((a) => clean(a, 60)).filter(Boolean).slice(0, 10),
+    publisher: clean(d.publisher, 100) || null,
+    published_on: /^\d{4}-\d{2}-\d{2}/.test(dt) ? dt.slice(0, 10) : null,
+    cover_url: thumb ? thumb.replace(/^http:\/\//, "https://") : null,
+    description: clean(d.contents, 1000) || null,
+  };
+}
+
+export async function kakaoSearch(query: string, target: "title" | "isbn" | "", page = 1, size = 20): Promise<{ books: BookInfo[]; is_end: boolean }> {
+  const key = Deno.env.get("BK_KAKAO_REST_KEY");
+  if (!key) throw new UserError(503, "책 검색 준비가 아직 안 됐어요. 관리자에게 알려 주세요.", "NO_KAKAO_KEY");
+  const base = Deno.env.get("BK_KAKAO_BASE") ?? "https://dapi.kakao.com";
+  const u = new URL(base + "/v3/search/book");
+  u.searchParams.set("query", query);
+  if (target) u.searchParams.set("target", target);
+  u.searchParams.set("page", String(page));
+  u.searchParams.set("size", String(size));
+  let r: Response;
+  try {
+    r = await fetch(u, { headers: { Authorization: `KakaoAK ${key}` }, signal: AbortSignal.timeout(8000) });
+  } catch (e) {
+    console.error("[kakao] fetch failed", e);
+    throw new UserError(502, "책 검색 서버에 연결하지 못했어요. 잠시 뒤 다시 해 주세요.", "KAKAO_DOWN");
+  }
+  if (r.status === 401 || r.status === 403) {
+    console.error("[kakao] auth", r.status, (await r.text()).slice(0, 200));
+    throw new UserError(502, "책 검색 열쇠가 맞지 않아요. 관리자에게 알려 주세요.", "KAKAO_AUTH");
+  }
+  if (!r.ok) {
+    console.error("[kakao] status", r.status, (await r.text()).slice(0, 200));
+    throw new UserError(502, "책 검색 서버가 응답하지 않아요. 잠시 뒤 다시 해 주세요.", "KAKAO_DOWN");
+  }
+  const j = await r.json();
+  const docs: Record<string, unknown>[] = Array.isArray(j?.documents) ? j.documents : [];
+  return {
+    books: docs.map(normalizeKakao).filter((b) => b.title),
+    is_end: j?.meta?.is_end !== false,
+  };
+}

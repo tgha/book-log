@@ -52,6 +52,17 @@ export const api = {
   logout: () => call("bk-auth", "/logout"),
   changePassword: (current_password, new_password) => call("bk-auth", "/password", { current_password, new_password }),
   rename: (display_name) => call("bk-auth", "/profile", { display_name }),
+  book: {
+    search: (query, page = 1) => call("bk-book", "/search", { query, page }),
+    isbn: (isbn) => call("bk-book", "/isbn", { isbn }),
+  },
+  shelf: {
+    list: () => call("bk-api", "/shelf/list"),
+    get: (shelf_id) => call("bk-api", "/shelf/get", { shelf_id }),
+    add: (body) => call("bk-api", "/shelf/add", body),
+    update: (shelf_id, fields) => call("bk-api", "/shelf/update", { ...fields, shelf_id }),
+    remove: (shelf_id) => call("bk-api", "/shelf/remove", { shelf_id }),
+  },
   admin: {
     users: () => call("bk-admin", "/users"),
     approve: (user_id) => call("bk-admin", "/approve", { user_id }),
