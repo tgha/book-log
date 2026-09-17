@@ -1,6 +1,8 @@
-// book-log 화면 (1단계: 가입 · 로그인 · 승인 대기 · 나 · 관리자 / 2단계 화면은 books.js)
+// book-log 화면 (1단계: 가입 · 로그인 · 승인 대기 · 나 · 관리자 / 2단계: books.js / 3단계: capture.js · notes.js)
 import { api, ApiError, session } from "./api.js";
 import { resetBooks, stopScanner, viewAdd, viewBook, viewConfirm, viewManual, viewScan, viewShelf } from "./books.js";
+import { leaveCapture, resetCapture, viewCapture } from "./capture.js";
+import { resetNotes, viewNote, viewNotes, viewWrite } from "./notes.js";
 import { APP_VERSION } from "./config.js";
 import { busy, confirmBox, formatDate, html, raw, secretBox, toast } from "./ui.js";
 
@@ -238,7 +240,6 @@ function wireInstall() {
 
 // ── 준비 중인 탭 ─────────────────────────────────────────
 const SOON = {
-  notes: { title: "기록", h: "찍은 문장과 밑줄이 여기 모여요", p: "책을 찍어 글자로 바꾸고, 마음에 드는 부분에 밑줄을 긋는 기능이 곧 열립니다." },
   explore: { title: "둘러보기", h: "회원들이 공개한 책장이 보여요", p: "책마다 공개를 켜면 승인된 회원끼리 서로의 기록을 볼 수 있게 됩니다." },
   stats: { title: "통계", h: "한 달에 읽은 책과 시간이 보여요", p: "읽은 권수, 읽은 시간, 하루 평균, 이어서 읽은 날을 달마다 보여 드릴 예정이에요." },
 };
@@ -346,12 +347,33 @@ async function viewAdmin() {
           <button class="btn btn-quiet" type="submit">저장</button>
         </form>
       </section>
+      <section class="block" id="usage-block">
+        <h2>글자 읽기 사용량</h2>
+        <div id="usage"><p class="person-meta">불러오는 중…</p></div>
+      </section>
     </main>`);
   app.querySelectorAll("[data-filter]").forEach((b) => b.addEventListener("click", () => {
     adminFilter = b.dataset.filter;
     viewAdmin();
   }));
-  await Promise.all([loadPeople(), loadSettings()]);
+  await Promise.all([loadPeople(), loadSettings(), loadUsage()]);
+}
+
+async function loadUsage() {
+  const box = app.querySelector("#usage");
+  if (!box) return;
+  try {
+    const u = await api.admin.usage();
+    const month = Number(u.month_start.slice(5, 7));
+    box.innerHTML = html`
+      <p class="usage-big"><strong>${u.month}</strong>번 <span>${month}월 전체</span></p>
+      <p class="person-meta">오늘 ${u.today_count}번${u.failed ? ` · 이번 달 실패 ${u.failed}번` : ""} · 구글 무료 범위는 한 달 1,000번</p>
+      ${raw(u.users.length ? html`<ul class="people">${u.users.map((x) => raw(html`<li class="person usage-row">
+        <span class="person-name">${x.display_name} <small>@${x.username}</small></span>
+        <span class="person-meta">이번 달 ${x.month}번 · 오늘 ${x.today}번${x.failed ? ` · 실패 ${x.failed}` : ""}</span></li>`))}</ul>` : "")}`;
+  } catch (err) {
+    box.innerHTML = html`<p class="person-meta">${err.message}</p>`;
+  }
 }
 
 async function loadPeople() {
@@ -443,6 +465,7 @@ async function loadSettings() {
 // ── 2단계 화면에 넘겨 주는 도구 모음 ──────────────────────
 const ctx = {
   app, state, mount, go, tabbar, meButton, field, showError, pendingNote, installBlock,
+  replace: (route) => { history.replaceState(null, "", `#/${route}`); render(); },
   afterShelfMount: wireInstall,
   isCurrent: (r) => currentRoute() === r,
 };
@@ -473,6 +496,8 @@ async function signOut() {
   try { await api.logout(); } catch { /* 이미 끊긴 출입증 */ }
   session.clear();
   resetBooks();
+  resetCapture();
+  resetNotes();
   state.user = null;
   state.pendingCount = 0;
   go("login");
@@ -481,6 +506,8 @@ async function signOut() {
 window.addEventListener("bk:signed-out", (e) => {
   state.user = null;
   resetBooks();
+  resetCapture();
+  resetNotes();
   stopWaiting();
   viewLogin(e.detail || "다시 로그인해 주세요.");
   history.replaceState(null, "", "#/login");
@@ -491,6 +518,7 @@ const currentRoute = () => (location.hash.replace(/^#\/?/, "").split("?")[0] || 
 function render() {
   const route = currentRoute();
   stopScanner();
+  leaveCapture();
   if (route !== "pending") stopWaiting();
   if (!state.user) {
     if (route === "signup") return viewSignup();
@@ -501,7 +529,7 @@ function render() {
     if (route !== "pending") history.replaceState(null, "", "#/pending");
     return viewPending();
   }
-  const [head, arg] = route.split("/");
+  const [head, arg, sub] = route.split("/");
   switch (head) {
     case "shelf": return viewShelf(ctx);
     case "add": return viewAdd(ctx);
@@ -509,7 +537,11 @@ function render() {
     case "add-confirm": return viewConfirm(ctx);
     case "add-manual": return viewManual(ctx);
     case "book": return arg ? viewBook(ctx, arg) : go("shelf");
-    case "notes": case "explore": case "stats": return viewSoon(route);
+    case "capture": return viewCapture(ctx, arg, sub);
+    case "write": return arg ? viewWrite(ctx, arg) : go("shelf");
+    case "note": return arg ? viewNote(ctx, arg) : go("notes");
+    case "notes": return viewNotes(ctx);
+    case "explore": case "stats": return viewSoon(route);
     case "me": return viewMe();
     case "admin": return viewAdmin();
     default: return go("shelf");

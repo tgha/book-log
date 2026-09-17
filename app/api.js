@@ -63,6 +63,23 @@ export const api = {
     update: (shelf_id, fields) => call("bk-api", "/shelf/update", { ...fields, shelf_id }),
     remove: (shelf_id) => call("bk-api", "/shelf/remove", { shelf_id }),
   },
+  ocr: {
+    quota: () => call("bk-ocr", "/quota"),
+    read: (image) => call("bk-ocr", "/read", { image }),
+  },
+  notes: {
+    list: (shelf_id) => call("bk-api", "/notes/list", shelf_id ? { shelf_id } : {}),
+    get: (note_id) => call("bk-api", "/notes/get", { note_id }),
+    add: (body) => call("bk-api", "/notes/add", body),
+    update: (note_id, fields) => call("bk-api", "/notes/update", { ...fields, note_id }),
+    remove: (note_id) => call("bk-api", "/notes/remove", { note_id }),
+    removePhoto: (note_id) => call("bk-api", "/notes/photo-remove", { note_id }),
+  },
+  highlights: {
+    list: (shelf_id) => call("bk-api", "/highlights/list", shelf_id ? { shelf_id } : {}),
+    add: (note_id, start, end) => call("bk-api", "/highlights/add", { note_id, start, end }),
+    remove: (highlight_id) => call("bk-api", "/highlights/remove", { highlight_id }),
+  },
   admin: {
     users: () => call("bk-admin", "/users"),
     approve: (user_id) => call("bk-admin", "/approve", { user_id }),
@@ -72,5 +89,6 @@ export const api = {
     resetPassword: (user_id) => call("bk-admin", "/reset-password", { user_id }),
     settings: () => call("bk-admin", "/settings"),
     setSetting: (key, value) => call("bk-admin", "/settings/set", { key, value }),
+    usage: () => call("bk-admin", "/usage"),
   },
 };

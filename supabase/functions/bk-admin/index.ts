@@ -1,4 +1,4 @@
-// bk-admin — 독서 앱 관리자 기능 (v1, 2026-09-17)
+// bk-admin — 독서 앱 관리자 기능 (v2, 2026-09-17 · 3단계: 글자 읽기 사용량)
 //   /users            회원 목록 (승인 대기 먼저)
 //   /approve          승인
 //   /reject           거절 (출입증 지움)
@@ -7,8 +7,9 @@
 //   /reset-password   임시 비밀번호 발급 (한 번만 보여 줌, 출입증 지움)
 //   /settings         설정값 보기
 //   /settings/set     설정값 바꾸기 (지금은 글자 읽기 하루 한도만)
+//   /usage            글자 읽기 사용량 (오늘 · 이번 달, 회원별)
 import {
-  hashPassword, json, requireApproved, serve, str, supa, tempPassword, UserError, type BkUser,
+  hashPassword, json, kstToday, requireApproved, serve, str, supa, tempPassword, UserError, type BkUser,
 } from "./common.ts";
 
 async function requireAdmin(body: Record<string, unknown>) {
@@ -99,5 +100,34 @@ serve("bk-admin", {
     });
     if (error) throw new Error(error.message);
     return json(200, { ok: true, key, value: n });
+  },
+
+  "/usage": async (_req, body) => {
+    await requireAdmin(body);
+    const today = kstToday();
+    const monthStart = today.slice(0, 8) + "01";
+    // Supabase 는 한 번에 최대 1000줄만 돌려주므로 1000줄씩 나눠 읽는다 (한 달 최대 약 3만 줄)
+    const data: { user_id: string; used_on: string; ok: boolean; error: string | null }[] = [];
+    for (let from = 0; from < 100000; from += 1000) {
+      const { data: part, error } = await supa.from("bk_ocr_usage").select("user_id, used_on, ok, error")
+        .gte("used_on", monthStart).order("id", { ascending: true }).range(from, from + 999);
+      if (error) throw new Error(error.message);
+      data.push(...(part ?? []));
+      if (!part || part.length < 1000) break;
+    }
+    const { data: users } = await supa.from("bk_users").select("id, username, display_name");
+    const byUser = new Map<string, { month: number; today: number; failed: number }>();
+    let month = 0, todayAll = 0, failed = 0;
+    for (const r of data ?? []) {
+      const u = byUser.get(r.user_id) ?? { month: 0, today: 0, failed: 0 };
+      u.month++; month++;
+      if (r.used_on === today) { u.today++; todayAll++; }
+      if (!r.ok) { u.failed++; failed++; }
+      byUser.set(r.user_id, u);
+    }
+    const rows = (users ?? []).filter((u) => byUser.has(u.id)).map((u) => ({
+      username: u.username, display_name: u.display_name, ...byUser.get(u.id)!,
+    })).sort((a, b) => b.month - a.month);
+    return json(200, { today, month_start: monthStart, month, today_count: todayAll, failed, users: rows });
   },
 });

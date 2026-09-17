@@ -1,4 +1,4 @@
-// book-log 엣지함수 공통 코드 (bk-auth · bk-admin 에 똑같이 복사해 씀)
+// book-log 엣지함수 공통 코드 (bk-auth · bk-admin · bk-book · bk-api · bk-ocr 폴더에 똑같이 복사해 씀)
 // · 모든 표 접근은 service role 로만 한다. (bk_ 표는 RLS + 권한 회수로 화면에서 막혀 있음)
 // · 열쇠는 코드에 없다. SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY 는 Supabase 가 자동으로 넣어 준다.
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -267,4 +267,29 @@ export async function kakaoSearch(query: string, target: "title" | "isbn" | "", 
     books: docs.map(normalizeKakao).filter((b) => b.title),
     is_end: j?.meta?.is_end !== false,
   };
+}
+
+// ── 사진 (3단계) ───────────────────────────────────────────────────
+/** 화면이 base64 로 보낸 사진을 바이트로 바꾸고, 진짜 사진(jpeg · png · webp)인지 · 크기가 알맞은지 확인 */
+export function decodeImage(v: unknown, maxBytes: number): { bytes: Uint8Array; mime: string; b64: string } {
+  if (typeof v !== "string" || !v) throw new UserError(400, "사진이 없어요. 다시 찍어 주세요.", "BAD_IMAGE");
+  const b64 = v.replace(/^data:image\/[a-z]+;base64,/, "").replace(/\s+/g, "");
+  if (b64.length > Math.ceil(maxBytes / 3) * 4 + 8) {
+    throw new UserError(413, "사진이 너무 커요. 필요한 부분만 잘라서 다시 해 주세요.", "IMAGE_TOO_BIG");
+  }
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) throw new UserError(400, "사진을 읽을 수 없어요. 다시 찍어 주세요.", "BAD_IMAGE");
+  let bytes: Uint8Array;
+  try {
+    bytes = unb64(b64);
+  } catch {
+    throw new UserError(400, "사진을 읽을 수 없어요. 다시 찍어 주세요.", "BAD_IMAGE");
+  }
+  const b = bytes;
+  let mime = "";
+  if (b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) mime = "image/jpeg";
+  else if (b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) mime = "image/png";
+  else if (b.length > 12 && String.fromCharCode(...b.slice(0, 4)) === "RIFF" && String.fromCharCode(...b.slice(8, 12)) === "WEBP") mime = "image/webp";
+  if (!mime || b.length < 100) throw new UserError(400, "사진 파일이 아니에요. 사진을 골라 주세요.", "BAD_IMAGE");
+  if (b.length > maxBytes) throw new UserError(413, "사진이 너무 커요. 필요한 부분만 잘라서 다시 해 주세요.", "IMAGE_TOO_BIG");
+  return { bytes, mime, b64 };
 }

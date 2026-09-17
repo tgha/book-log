@@ -1,0 +1,53 @@
+import json, urllib.request, subprocess
+BASE="http://127.0.0.1:8000/functions/v1"
+op=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+def call(fn,path,body):
+    req=urllib.request.Request(f"{BASE}/{fn}{path}",data=json.dumps(body).encode(),method="POST",headers={"content-type":"application/json"})
+    try: r=op.open(req); return r.status,json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        raw=e.read()
+        try: return e.code,json.loads(raw)
+        except Exception: return e.code,{"raw":raw.decode()}
+def sql(q): return subprocess.run(["su","postgres","-c",f"psql -h /tmp/pgtest -p 55432 -U postgres -Atq -c \"{q}\""],capture_output=True,text=True).stdout.strip()
+res=[]
+def check(n,c,i=""): res.append(bool(c)); print(("PASS " if c else "FAIL ")+n+("" if c else f" -> {i}"))
+sql("delete from bk_users; delete from bk_books;")
+s,b=call("bk-auth","/signup",{"username":"reader_a","password":"reading2026","display_name":"가"}); A=b["token"]
+s,b=call("bk-auth","/signup",{"username":"reader_b","password":"reading2026","display_name":"나"}); B=b["token"]
+s,b=call("bk-book","/search",{"token":A,"query":"사피엔스"}); check("대기 회원은 책 검색 불가",s==403,(s,b))
+sql("update bk_users set status='approved'")
+s,b=call("bk-book","/search",{"token":A,"query":""}); check("빈 검색어 거부",s==400,(s,b))
+s,b=call("bk-book","/search",{"token":A,"query":"심리"}); check("제목 검색 2권",s==200 and len(b["books"])==2,(s,b))
+bk=b["books"][1] if s==200 else {}
+check("카카오 정보 정리(태그 제거·https·날짜·ISBN13)", bk.get("description")=="인류의 역사를 다룬 책" and bk.get("cover_url","").startswith("https://") and bk.get("published_on")=="2015-11-23" and bk.get("isbn13")=="9788934972464" and bk.get("shelf_id") is None, bk)
+check("화면으로 열쇠가 나가지 않음", "test-key" not in json.dumps(b))
+s,b=call("bk-book","/isbn",{"token":A,"isbn":"9788934972465"}); check("검산 틀린 ISBN 거부",s==400,(s,b))
+s,b=call("bk-book","/isbn",{"token":A,"isbn":"978-89-349-7246-4"}); check("하이픈 있는 바코드 번호도 찾음",s==200 and b["books"][0]["title"]=="사피엔스",(s,b))
+s,b=call("bk-book","/isbn",{"token":A,"isbn":"9788970123455"}); check("없는 ISBN은 직접 입력 안내",s==404 and b.get("code")=="NOT_FOUND",(s,b))
+s,b=call("bk-book","/search",{"token":A,"query":"ERR500"}); check("카카오 고장 시 쉬운 안내 502",s==502 and "잠시 뒤" in b["error"],(s,b))
+s,b=call("bk-api","/shelf/add",{"token":A,"isbn":"9788934972464","status":"reading","total_pages":636}); check("ISBN으로 서재에 넣기",s==200 and b["item"]["book"]["title"]=="사피엔스" and b["item"]["started_on"],(s,b))
+sid=b.get("item",{}).get("id")
+check("책 정보는 서버가 카카오에서 받은 값", sql("select publisher||'/'||source from bk_books where isbn13='9788934972464'")=="김영사/kakao")
+s,b=call("bk-api","/shelf/add",{"token":A,"isbn":"9788934972464"}); check("같은 책 두 번 넣기 거부(기존 책 알려줌)",s==409 and b["code"]=="ALREADY:"+str(sid),(s,b))
+s,b=call("bk-api","/shelf/add",{"token":B,"isbn":"9788934972464","status":"want"}); check("다른 사람은 같은 책 넣기 가능",s==200 and b["item"]["started_on"] is None,(s,b))
+check("책 정보는 한 번만 저장", sql("select count(*) from bk_books where isbn13='9788934972464'")=="1")
+s,b=call("bk-book","/search",{"token":A,"query":"사피엔스"}); check("검색 결과에 '내 서재에 있음' 표시",s==200 and b["books"][0]["shelf_id"]==sid,(s,b))
+s,b=call("bk-api","/shelf/get",{"token":B,"shelf_id":sid}); check("남의 서재 책은 못 봄",s==404,(s,b))
+s,b=call("bk-api","/shelf/update",{"token":B,"shelf_id":sid,"status":"stopped"}); check("남의 서재 책은 못 고침",s==404,(s,b))
+s,b=call("bk-api","/shelf/update",{"token":A,"shelf_id":sid,"current_page":700}); check("전체보다 많은 쪽 거부",s==400,(s,b))
+s,b=call("bk-api","/shelf/update",{"token":A,"shelf_id":sid,"current_page":120}); check("읽은 쪽 저장",s==200 and b["item"]["current_page"]==120,(s,b))
+s,b=call("bk-api","/shelf/update",{"token":A,"shelf_id":sid,"status":"finished"}); check("다 읽음 → 완독일·쪽수 채움",s==200 and b["item"]["finished_on"] and b["item"]["current_page"]==636,(s,b))
+s,b=call("bk-api","/shelf/update",{"token":A,"shelf_id":sid,"status":"reading"}); check("다시 읽는 중 → 완독일 지움",s==200 and b["item"]["finished_on"] is None,(s,b))
+s,b=call("bk-api","/shelf/update",{"token":A,"shelf_id":sid,"started_on":"2099-01-01"}); check("미래 날짜 거부",s==400,(s,b))
+s,b=call("bk-api","/shelf/update",{"token":A,"shelf_id":sid,"started_on":"2026-09-10","finished_on":"2026-09-01"}); check("완독일이 시작일보다 빠르면 거부",s==400,(s,b))
+s,b=call("bk-api","/shelf/add",{"token":A,"manual":{"title":""}}); check("직접 입력: 제목 없으면 거부",s==400,(s,b))
+s,b=call("bk-api","/shelf/add",{"token":A,"manual":{"title":"우리 동네 문집","authors":"홍길동, 김철수","publisher":"자가출판","isbn":"123"}}); check("직접 입력: 틀린 ISBN 거부",s==400,(s,b))
+s,b=call("bk-api","/shelf/add",{"token":A,"manual":{"title":"우리 동네 문집","authors":"홍길동, 김철수","publisher":"자가출판"},"status":"want"}); check("직접 입력으로 넣기",s==200 and b["item"]["book"]["authors"]==["홍길동","김철수"] and b["item"]["book"]["source"]=="manual",(s,b))
+s,b=call("bk-api","/shelf/add",{"token":A,"manual":{"title":"<script>alert(1)</script>"}}); check("직접 입력 글자는 그대로 저장(화면에서 안전 처리)",s==200,(s,b))
+s,b=call("bk-api","/shelf/list",{"token":A}); check("내 서재 목록 3권",s==200 and len(b["items"])==3,(s,b))
+s,b=call("bk-api","/shelf/list",{"token":B}); check("다른 사람 목록은 1권",s==200 and len(b["items"])==1,(s,b))
+sql(f"insert into bk_notes(user_id,shelf_id,kind,body) select user_id,id,'thought','메모' from bk_shelf where id='{sid}'")
+s,b=call("bk-api","/shelf/remove",{"token":A,"shelf_id":sid}); check("서재에서 빼기",s==200,(s,b))
+check("빼면 그 책 메모도 지워지고 책 정보는 남음", sql(f"select (select count(*) from bk_notes where shelf_id='{sid}')||'/'||(select count(*) from bk_books where isbn13='9788934972464')")=="0/1")
+s,b=call("bk-api","/shelf/get",{"token":A,"shelf_id":"not-a-uuid"}); check("이상한 ID 거부",s==400,(s,b))
+print(f"\n{sum(res)}/{len(res)} 통과")

@@ -1,5 +1,7 @@
 // book-log 2단계 화면: 서재 목록 · 책 등록(제목 검색 · 바코드 · 직접 입력) · 책 자세히
 import { api } from "./api.js";
+import { markFromBook } from "./capture.js";
+import { mountBookNotes } from "./notes.js";
 import { busy, confirmBox, html, raw, toast } from "./ui.js";
 
 const STATUS = { reading: "읽는 중", want: "읽고 싶은", finished: "다 읽음", stopped: "그만 읽음" };
@@ -422,6 +424,7 @@ function drawBook(ctx, item) {
         <div><h1 class="book-h1">${b.title}</h1><p class="book-by">${byline(b)}</p><p class="book-by">${publine(b)}</p></div>
       </div>
       <form id="status-form">${raw(statusChips("상태", item.status))}</form>
+      <section class="block" id="notes-block"></section>
       <section class="block">
         <h2>얼마나 읽었나요</h2>
         ${raw(progress(item))}
@@ -446,12 +449,11 @@ function drawBook(ctx, item) {
         </form>
       </section>
       <section class="block">
-        <h2>곧 열리는 기능</h2>
+        <h2>독서 시간</h2>
         <div class="soon-actions">
           <button class="btn btn-quiet" type="button" disabled>독서 시작</button>
-          <button class="btn btn-quiet" type="button" disabled>문장 찍기</button>
         </div>
-        <p class="book-by">독서 시간 재기와 문장 찍기는 다음 업데이트에서 열려요.</p>
+        <p class="book-by">독서 시간 재기는 다음 업데이트에서 열려요.</p>
       </section>
       ${raw(b.description ? html`<section class="block"><h2>책 소개</h2><p class="book-desc">${b.description}</p></section>` : "")}
       <section class="block">
@@ -459,6 +461,9 @@ function drawBook(ctx, item) {
       </section>
     </main>`);
   decorate(ctx.app);
+  const notesBlock = ctx.app.querySelector("#notes-block");
+  notesBlock.addEventListener("click", (e) => { if (e.target.closest("[data-start-capture]")) markFromBook(item.id); });
+  mountBookNotes(ctx, notesBlock, item.id);
 
   const save = async (fields, form, button) => {
     const work = async () => {
@@ -501,7 +506,7 @@ function drawBook(ctx, item) {
   ctx.app.querySelector("#remove").addEventListener("click", async (e) => {
     const ok = await confirmBox({
       title: "서재에서 뺄까요?",
-      body: `「${b.title}」과 이 책에 남긴 기록(독서 시간·메모)이 함께 지워지고, 되돌릴 수 없어요.`,
+      body: `「${b.title}」과 이 책에 남긴 기록(독서 시간·메모·밑줄·사진)이 함께 지워지고, 되돌릴 수 없어요.`,
       ok: "빼기", danger: true,
     });
     if (!ok) return;
